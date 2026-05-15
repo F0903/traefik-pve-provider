@@ -1,6 +1,6 @@
 # Traefik PVE Provider
 
-Provision Traefik routers and services via your PVE container/vm notes.
+Automatically provision Traefik routers and services via your PVE container/vm notes.
 
 Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider) but with simpler configuration and a larger feature-set.
 
