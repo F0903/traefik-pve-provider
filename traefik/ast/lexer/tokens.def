@@ -1,0 +1,67 @@
+# TokenName lexeme
+EOF
+Identifier
+Dot
+Equals
+Value
+Traefik traefik
+HTTP http
+TCP tcp
+UDP udp
+Routers routers
+Services services
+ServersTransports serverstransports
+ServersTransport serverstransport
+LoadBalancer loadbalancer
+Server server
+HealthCheck healthcheck
+Headers headers
+Sticky sticky
+Cookie cookie
+ResponseForwarding responseforwarding
+ForwardingTimeouts forwardingtimeouts
+ProxyProtocol proxyprotocol
+TLS tls
+Domains domains
+Enable enable
+Name name
+Rule rule
+Service service
+EntryPoints entrypoints
+EntryPoint entrypoint
+Middlewares middlewares
+Priority priority
+CertResolver certresolver
+Options options
+Passthrough passthrough
+URL url
+Scheme scheme
+Port port
+IP ip
+Address address
+InsecureSkipVerify insecureskipverify
+PassHostHeader passhostheader
+Path path
+Interval interval
+Timeout timeout
+Method method
+Hostname hostname
+FollowRedirects followredirects
+Secure secure
+HTTPOnly httponly
+SameSite samesite
+FlushInterval flushinterval
+Version version
+TerminationDelay terminationdelay
+ServerName servername
+RootCAs rootcas
+MaxIdleConnsPerHost maxidleconnsperhost
+DisableHTTP2 disablehttp2
+PeerCertURI peercerturi
+DialTimeout dialtimeout
+ResponseHeaderTimeout responseheadertimeout
+IdleConnTimeout idleconntimeout
+ReadIdleTimeout readidletimeout
+PingTimeout pingtimeout
+Main main
+SANs sans

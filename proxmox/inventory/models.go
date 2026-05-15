@@ -1,6 +1,9 @@
 package inventory
 
-import "github.com/F0903/traefik-pve-provider/metadata"
+import (
+	"github.com/F0903/traefik-pve-provider/metadata"
+	"github.com/F0903/traefik-pve-provider/traefik/labels"
+)
 
 type Kind string
 
@@ -46,7 +49,7 @@ type Problem struct {
 func (s Snapshot) TraefikEnabled() []Workload {
 	enabled := make([]Workload, 0)
 	for _, workload := range s.Workloads {
-		if workload.TraefikLabels["traefik.enable"] == "true" {
+		if labels.Enabled(workload.TraefikLabels) {
 			enabled = append(enabled, workload)
 		}
 	}

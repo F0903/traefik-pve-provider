@@ -9,6 +9,7 @@ import (
 
 	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/proxmox"
+	"github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
 const defaultMaxConcurrency = 4
@@ -216,7 +217,7 @@ func (s *Scanner) applyConfig(workload *Workload, cfg proxmox.GuestConfig) {
 }
 
 func (s *Scanner) shouldResolveIPs(workload Workload, status string) bool {
-	return !s.options.SkipIPResolution && status == "running" && labelsEnableTraefik(workload.TraefikLabels)
+	return !s.options.SkipIPResolution && status == "running" && labels.Enabled(workload.TraefikLabels)
 }
 
 func (s *Scanner) includedNode(node string) bool {
@@ -319,22 +320,6 @@ func normalizedMaxConcurrency(value int) int {
 		return defaultMaxConcurrency
 	}
 	return value
-}
-
-func labelsEnableTraefik(labels map[string]string) bool {
-	enabled, ok := parseBool(labels["traefik.enable"])
-	return ok && enabled
-}
-
-func parseBool(raw string) (bool, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "true", "1", "yes", "on":
-		return true, true
-	case "false", "0", "no", "off":
-		return false, true
-	default:
-		return false, false
-	}
 }
 
 func problem(node string, kind Kind, id int, stage string, err error) Problem {

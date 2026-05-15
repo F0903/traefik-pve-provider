@@ -1,20 +1,21 @@
 package traefik
 
 import (
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
-
+	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
+	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 	"github.com/traefik/genconf/dynamic/types"
 )
 
-func buildRouterTLS(labels map[string]string, routerPrefix string) *dynamic.RouterTLSConfig {
-	tlsEnabled, hasTLSLabel := parseBool(labels[routerPrefix+"tls"])
-	certResolver := strings.TrimSpace(labels[routerPrefix+"tls.certresolver"])
-	options := strings.TrimSpace(labels[routerPrefix+"tls.options"])
-	domains := routerTLSDomains(labels, routerPrefix)
+func buildRouterTLS(source *labelcfg.Resource) *dynamic.RouterTLSConfig {
+	if source == nil {
+		return nil
+	}
+
+	tlsEnabled, hasTLSLabel := source.BoolValue(lexer.TokenTLS)
+	certResolver, _ := source.StringValue(lexer.TokenTLS, lexer.TokenCertResolver)
+	options, _ := source.StringValue(lexer.TokenTLS, lexer.TokenOptions)
+	domains := routerTLSDomains(source, lexer.TokenTLS)
 
 	if !tlsEnabled && !hasTLSLabel && certResolver == "" && options == "" && len(domains) == 0 {
 		return nil
@@ -27,15 +28,16 @@ func buildRouterTLS(labels map[string]string, routerPrefix string) *dynamic.Rout
 	}
 }
 
-func buildTCPRouterTLS(labels map[string]string, routerPrefix string) *dynamic.RouterTCPTLSConfig {
-	tlsEnabled, hasTLSLabel := firstBoolLabel(labels, routerPrefix+"tls", "traefik.tcp.tls")
-	passthrough, hasPassthrough := firstBoolLabel(labels, routerPrefix+"tls.passthrough", "traefik.tcp.tls.passthrough")
-	certResolver := firstLabel(labels, routerPrefix+"tls.certresolver", "traefik.tcp.tls.certresolver")
-	options := firstLabel(labels, routerPrefix+"tls.options", "traefik.tcp.tls.options")
-	domains := routerTLSDomains(labels, routerPrefix)
-	if len(domains) == 0 {
-		domains = routerTLSDomains(labels, "traefik.tcp.")
+func buildTCPRouterTLS(source *labelcfg.Resource) *dynamic.RouterTCPTLSConfig {
+	if source == nil {
+		return nil
 	}
+
+	tlsEnabled, hasTLSLabel := source.BoolValue(lexer.TokenTLS)
+	passthrough, hasPassthrough := source.BoolValue(lexer.TokenTLS, lexer.TokenPassthrough)
+	certResolver, _ := source.StringValue(lexer.TokenTLS, lexer.TokenCertResolver)
+	options, _ := source.StringValue(lexer.TokenTLS, lexer.TokenOptions)
+	domains := routerTLSDomains(source, lexer.TokenTLS)
 
 	if !tlsEnabled && !hasTLSLabel && !hasPassthrough && certResolver == "" && options == "" && len(domains) == 0 {
 		return nil
@@ -49,25 +51,19 @@ func buildTCPRouterTLS(labels map[string]string, routerPrefix string) *dynamic.R
 	}
 }
 
-func firstBoolLabel(labels map[string]string, keys ...string) (bool, bool) {
-	for _, key := range keys {
-		raw, exists := labels[key]
-		if !exists {
-			continue
-		}
-		return parseBool(raw)
+func routerTLSDomains(source *labelcfg.Resource, path ...lexer.TokenType) []types.Domain {
+	if source == nil {
+		return nil
 	}
-	return false, false
-}
 
-func routerTLSDomains(labels map[string]string, routerPrefix string) []types.Domain {
-	indexed := indexedTLSDomains(labels, routerPrefix)
+	indexed := indexedTLSDomains(source, path...)
 	if len(indexed) > 0 {
 		return indexed
 	}
 
-	rawDomains := splitCSV(labels[routerPrefix+"tls.domains"])
-	if len(rawDomains) == 0 {
+	domainPath := append(append([]lexer.TokenType{}, path...), lexer.TokenDomains)
+	rawDomains, ok := source.ListValue(domainPath...)
+	if !ok {
 		return nil
 	}
 
@@ -78,38 +74,14 @@ func routerTLSDomains(labels map[string]string, routerPrefix string) []types.Dom
 	return domains
 }
 
-func indexedTLSDomains(labels map[string]string, routerPrefix string) []types.Domain {
-	pattern := regexp.MustCompile("^" + regexp.QuoteMeta(routerPrefix) + `tls\.domains\[(\d+)\]\.(main|sans)$`)
-	domainMap := make(map[int]*types.Domain)
-
-	for key, value := range labels {
-		matches := pattern.FindStringSubmatch(key)
-		if matches == nil {
-			continue
-		}
-		index, err := strconv.Atoi(matches[1])
-		if err != nil {
-			continue
-		}
-		if domainMap[index] == nil {
-			domainMap[index] = &types.Domain{}
-		}
-		if matches[2] == "main" {
-			domainMap[index].Main = strings.TrimSpace(value)
-		} else {
-			domainMap[index].SANs = splitCSV(value)
-		}
-	}
-
-	indices := make([]int, 0, len(domainMap))
-	for index := range domainMap {
-		indices = append(indices, index)
-	}
-	sort.Ints(indices)
-
-	domains := make([]types.Domain, 0, len(indices))
-	for _, index := range indices {
-		domains = append(domains, *domainMap[index])
+func indexedTLSDomains(source *labelcfg.Resource, path ...lexer.TokenType) []types.Domain {
+	labelDomains := source.TLSDomains(path...)
+	domains := make([]types.Domain, 0, len(labelDomains))
+	for _, source := range labelDomains {
+		domains = append(domains, types.Domain{
+			Main: source.Main,
+			SANs: source.SANs,
+		})
 	}
 	return domains
 }

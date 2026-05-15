@@ -16,23 +16,23 @@ func Build(snapshot inventory.Snapshot, options Options) Result {
 	builder := newConfigBuilder(options)
 
 	for _, workload := range snapshot.Workloads {
-		builder.validateLabels(workload)
-		if !isEnabled(workload.TraefikLabels) {
+		labels := builder.validateLabels(workload)
+		if !labels.Enabled() {
 			continue
 		}
 
-		hasHTTP := hasLabelPrefix(workload.TraefikLabels, "traefik.http.")
-		hasTCP := hasLabelPrefix(workload.TraefikLabels, "traefik.tcp.")
-		hasUDP := hasLabelPrefix(workload.TraefikLabels, "traefik.udp.")
+		hasHTTP := labels.HasExplicitHTTP()
+		hasTCP := labels.HasExplicitTCP()
+		hasUDP := labels.HasExplicitUDP()
 
 		if hasHTTP || (!hasTCP && !hasUDP) {
-			builder.addHTTPWorkload(workload)
+			builder.addHTTPWorkload(workload, labels)
 		}
 		if hasTCP {
-			builder.addTCPWorkload(workload)
+			builder.addTCPWorkload(workload, labels)
 		}
 		if hasUDP {
-			builder.addUDPWorkload(workload)
+			builder.addUDPWorkload(workload, labels)
 		}
 	}
 

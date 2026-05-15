@@ -1,84 +1,92 @@
 package traefik
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
+	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
+	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
 
-func buildHTTPRouter(workload inventory.Workload, routerName, defaultService string, options Options) *dynamic.Router {
-	prefix := "traefik.http.routers." + routerName + "."
+func buildHTTPRouter(source *labelcfg.Resource, routerName, defaultService string, options Options) *dynamic.Router {
 	router := &dynamic.Router{
-		Rule:    labelOrDefault(workload.TraefikLabels, prefix+"rule", defaultHTTPRule(routerName, options)),
-		Service: labelOrDefault(workload.TraefikLabels, prefix+"service", defaultService),
+		Rule:    defaultHTTPRule(routerName, options),
+		Service: defaultService,
 	}
-
-	if entrypoints := splitCSV(firstLabel(workload.TraefikLabels, prefix+"entrypoints", "traefik.entrypoints")); len(entrypoints) > 0 {
-		router.EntryPoints = entrypoints
-	} else if entrypoint := firstLabel(workload.TraefikLabels, prefix+"entrypoint", "traefik.entrypoint"); entrypoint != "" {
-		router.EntryPoints = []string{entrypoint}
+	if source != nil {
+		if rule, ok := source.StringValue(lexer.TokenRule); ok {
+			router.Rule = rule
+		}
+		if service, ok := source.StringValue(lexer.TokenService); ok {
+			router.Service = service
+		}
+		if entrypoints, ok := source.ListValue(lexer.TokenEntryPoints); ok {
+			router.EntryPoints = entrypoints
+		} else if entrypoint, ok := source.StringValue(lexer.TokenEntryPoint); ok {
+			router.EntryPoints = []string{entrypoint}
+		}
+		if middlewares, ok := source.ListValue(lexer.TokenMiddlewares); ok {
+			router.Middlewares = middlewares
+		}
+		if priority, ok := source.IntValue(lexer.TokenPriority); ok {
+			router.Priority = priority
+		}
+		router.TLS = buildRouterTLS(source)
 	}
-
-	if middlewares := splitCSV(firstLabel(workload.TraefikLabels, prefix+"middlewares", "traefik.middlewares")); len(middlewares) > 0 {
-		router.Middlewares = middlewares
-	}
-
-	if priority, ok := parseInt(workload.TraefikLabels[prefix+"priority"]); ok {
-		router.Priority = priority
-	}
-
-	router.TLS = buildRouterTLS(workload.TraefikLabels, prefix)
 	return router
 }
 
-func buildHTTPService(workload inventory.Workload, serviceName string) *dynamic.Service {
-	prefix := "traefik.http.services." + serviceName + ".loadbalancer."
+func buildHTTPService(workload inventory.Workload, source *labelcfg.Resource) *dynamic.Service {
 	passHostHeader := true
-	if parsed, ok := parseBool(workload.TraefikLabels[prefix+"passhostheader"]); ok {
+	if parsed, ok := source.BoolValue(lexer.TokenLoadBalancer, lexer.TokenPassHostHeader); ok {
 		passHostHeader = parsed
 	}
 
 	loadBalancer := &dynamic.ServersLoadBalancer{
 		PassHostHeader: &passHostHeader,
-		Servers:        buildHTTPServers(workload, serviceName),
+		Servers:        buildHTTPServers(workload, source),
 	}
 
-	if healthCheck := buildHealthCheck(workload.TraefikLabels, prefix); healthCheck != nil {
+	if healthCheck := buildHealthCheck(source); healthCheck != nil {
 		loadBalancer.HealthCheck = healthCheck
 	}
-	if sticky := buildSticky(workload.TraefikLabels, prefix); sticky != nil {
+	if sticky := buildSticky(source); sticky != nil {
 		loadBalancer.Sticky = sticky
 	}
-	if flushInterval := strings.TrimSpace(workload.TraefikLabels[prefix+"responseforwarding.flushinterval"]); flushInterval != "" {
+	if flushInterval, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenResponseForwarding, lexer.TokenFlushInterval); ok {
 		loadBalancer.ResponseForwarding = &dynamic.ResponseForwarding{FlushInterval: flushInterval}
 	}
-	if serversTransport := firstLabel(workload.TraefikLabels, prefix+"serverstransport", "traefik.serverstransport"); serversTransport != "" {
+	if serversTransport, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServersTransport); ok {
 		loadBalancer.ServersTransport = serversTransport
 	}
 
 	return &dynamic.Service{LoadBalancer: loadBalancer}
 }
 
-func buildHTTPServersTransport(labels map[string]string, transportName string) *dynamic.ServersTransport {
-	prefix := "traefik.http.serverstransports." + transportName + "."
-	transport := &dynamic.ServersTransport{
-		ServerName:  strings.TrimSpace(labels[prefix+"servername"]),
-		RootCAs:     splitCSV(labels[prefix+"rootcas"]),
-		PeerCertURI: strings.TrimSpace(labels[prefix+"peercerturi"]),
-	}
+func buildHTTPServersTransport(source *labelcfg.Resource) *dynamic.ServersTransport {
+	transport := &dynamic.ServersTransport{}
 
-	if insecureSkipVerify, ok := parseBool(labels[prefix+"insecureskipverify"]); ok {
+	if serverName, ok := source.StringValue(lexer.TokenServerName); ok {
+		transport.ServerName = serverName
+	}
+	if rootCAs, ok := source.ListValue(lexer.TokenRootCAs); ok {
+		transport.RootCAs = rootCAs
+	}
+	if peerCertURI, ok := source.StringValue(lexer.TokenPeerCertURI); ok {
+		transport.PeerCertURI = peerCertURI
+	}
+	if insecureSkipVerify, ok := source.BoolValue(lexer.TokenInsecureSkipVerify); ok {
 		transport.InsecureSkipVerify = insecureSkipVerify
 	}
-	if maxIdleConnsPerHost, ok := parseInt(labels[prefix+"maxidleconnsperhost"]); ok {
+	if maxIdleConnsPerHost, ok := source.IntValue(lexer.TokenMaxIdleConnsPerHost); ok {
 		transport.MaxIdleConnsPerHost = maxIdleConnsPerHost
 	}
-	if disableHTTP2, ok := parseBool(labels[prefix+"disablehttp2"]); ok {
+	if disableHTTP2, ok := source.BoolValue(lexer.TokenDisableHTTP2); ok {
 		transport.DisableHTTP2 = disableHTTP2
 	}
-	if forwardingTimeouts := buildForwardingTimeouts(labels, prefix+"forwardingtimeouts."); forwardingTimeouts != nil {
+	if forwardingTimeouts := buildForwardingTimeouts(source); forwardingTimeouts != nil {
 		transport.ForwardingTimeouts = forwardingTimeouts
 	}
 
@@ -89,13 +97,22 @@ func buildInsecureHTTPServersTransport() *dynamic.ServersTransport {
 	return &dynamic.ServersTransport{InsecureSkipVerify: true}
 }
 
-func buildForwardingTimeouts(labels map[string]string, prefix string) *dynamic.ForwardingTimeouts {
-	timeouts := &dynamic.ForwardingTimeouts{
-		DialTimeout:           strings.TrimSpace(labels[prefix+"dialtimeout"]),
-		ResponseHeaderTimeout: strings.TrimSpace(labels[prefix+"responseheadertimeout"]),
-		IdleConnTimeout:       strings.TrimSpace(labels[prefix+"idleconntimeout"]),
-		ReadIdleTimeout:       strings.TrimSpace(labels[prefix+"readidletimeout"]),
-		PingTimeout:           strings.TrimSpace(labels[prefix+"pingtimeout"]),
+func buildForwardingTimeouts(source *labelcfg.Resource) *dynamic.ForwardingTimeouts {
+	timeouts := &dynamic.ForwardingTimeouts{}
+	if dialTimeout, ok := source.StringValue(lexer.TokenForwardingTimeouts, lexer.TokenDialTimeout); ok {
+		timeouts.DialTimeout = dialTimeout
+	}
+	if responseHeaderTimeout, ok := source.StringValue(lexer.TokenForwardingTimeouts, lexer.TokenResponseHeaderTimeout); ok {
+		timeouts.ResponseHeaderTimeout = responseHeaderTimeout
+	}
+	if idleConnTimeout, ok := source.StringValue(lexer.TokenForwardingTimeouts, lexer.TokenIdleConnTimeout); ok {
+		timeouts.IdleConnTimeout = idleConnTimeout
+	}
+	if readIdleTimeout, ok := source.StringValue(lexer.TokenForwardingTimeouts, lexer.TokenReadIdleTimeout); ok {
+		timeouts.ReadIdleTimeout = readIdleTimeout
+	}
+	if pingTimeout, ok := source.StringValue(lexer.TokenForwardingTimeouts, lexer.TokenPingTimeout); ok {
+		timeouts.PingTimeout = pingTimeout
 	}
 	if timeouts.DialTimeout == "" &&
 		timeouts.ResponseHeaderTimeout == "" &&
@@ -107,15 +124,13 @@ func buildForwardingTimeouts(labels map[string]string, prefix string) *dynamic.F
 	return timeouts
 }
 
-func buildHTTPServers(workload inventory.Workload, serviceName string) []dynamic.Server {
-	urlLabel := fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.url", serviceName)
-	if url := strings.TrimSpace(workload.TraefikLabels[urlLabel]); url != "" {
+func buildHTTPServers(workload inventory.Workload, source *labelcfg.Resource) []dynamic.Server {
+	if url, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenURL); ok {
 		return []dynamic.Server{{URL: url}}
 	}
 
-	scheme, port := serviceSchemeAndPort(workload.TraefikLabels, serviceName)
-	ipLabel := fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.ip", serviceName)
-	if ip := strings.TrimSpace(workload.TraefikLabels[ipLabel]); ip != "" {
+	scheme, port := serviceSchemeAndPort(source)
+	if ip, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenIP); ok {
 		return []dynamic.Server{{URL: serverURL(scheme, ip, port)}}
 	}
 
@@ -133,14 +148,16 @@ func buildHTTPServers(workload inventory.Workload, serviceName string) []dynamic
 	return []dynamic.Server{{URL: serverURL(scheme, workload.Name+"."+workload.Node, port)}}
 }
 
-func serviceSchemeAndPort(labels map[string]string, serviceName string) (string, string) {
-	prefix := "traefik.http.services." + serviceName + ".loadbalancer.server."
-	scheme := firstLabel(labels, prefix+"scheme", "traefik.scheme")
-	if scheme == "" {
-		scheme = "http"
+func serviceSchemeAndPort(source *labelcfg.Resource) (string, string) {
+	scheme := "http"
+	if parsed, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenScheme); ok {
+		scheme = parsed
 	}
 
-	port := firstLabel(labels, prefix+"port", "traefik.port")
+	port := ""
+	if parsed, ok := source.IntValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenPort); ok {
+		port = strconv.Itoa(parsed)
+	}
 	if port == "" {
 		if scheme == "https" {
 			port = "443"
@@ -151,68 +168,60 @@ func serviceSchemeAndPort(labels map[string]string, serviceName string) (string,
 	return scheme, port
 }
 
-func httpServiceInsecureSkipVerify(labels map[string]string, serviceName string) (bool, bool) {
-	serviceKey := "traefik.http.services." + serviceName + ".loadbalancer.insecureskipverify"
-	if raw, exists := labels[serviceKey]; exists {
-		return parseBool(raw)
-	}
-	if raw, exists := labels["traefik.insecureskipverify"]; exists {
-		return parseBool(raw)
-	}
-	return false, false
+func httpServiceInsecureSkipVerify(source *labelcfg.Resource) (bool, bool) {
+	return source.BoolValue(lexer.TokenLoadBalancer, lexer.TokenInsecureSkipVerify)
 }
 
-func buildHealthCheck(labels map[string]string, servicePrefix string) *dynamic.ServerHealthCheck {
-	path := strings.TrimSpace(labels[servicePrefix+"healthcheck.path"])
-	if path == "" {
+func buildHealthCheck(source *labelcfg.Resource) *dynamic.ServerHealthCheck {
+	path, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenPath)
+	if !ok {
 		return nil
 	}
 
 	healthCheck := &dynamic.ServerHealthCheck{Path: path}
-	if interval := strings.TrimSpace(labels[servicePrefix+"healthcheck.interval"]); interval != "" {
+	if interval, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenInterval); ok {
 		healthCheck.Interval = interval
 	}
-	if timeout := strings.TrimSpace(labels[servicePrefix+"healthcheck.timeout"]); timeout != "" {
+	if timeout, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenTimeout); ok {
 		healthCheck.Timeout = timeout
 	}
-	if scheme := strings.TrimSpace(labels[servicePrefix+"healthcheck.scheme"]); scheme != "" {
+	if scheme, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenScheme); ok {
 		healthCheck.Scheme = scheme
 	}
-	if method := strings.TrimSpace(labels[servicePrefix+"healthcheck.method"]); method != "" {
+	if method, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenMethod); ok {
 		healthCheck.Method = method
 	}
-	if hostname := strings.TrimSpace(labels[servicePrefix+"healthcheck.hostname"]); hostname != "" {
+	if hostname, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenHostname); ok {
 		healthCheck.Hostname = hostname
 	}
-	if port, ok := parseInt(labels[servicePrefix+"healthcheck.port"]); ok {
+	if port, ok := source.IntValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenPort); ok {
 		healthCheck.Port = port
 	}
-	if followRedirects, ok := parseBool(labels[servicePrefix+"healthcheck.followredirects"]); ok {
+	if followRedirects, ok := source.BoolValue(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenFollowRedirects); ok {
 		healthCheck.FollowRedirects = &followRedirects
 	}
-	if headers := labelsWithPrefix(labels, servicePrefix+"healthcheck.headers."); len(headers) > 0 {
+	if headers := source.Headers(lexer.TokenLoadBalancer, lexer.TokenHealthCheck, lexer.TokenHeaders); len(headers) > 0 {
 		healthCheck.Headers = headers
 	}
 	return healthCheck
 }
 
-func buildSticky(labels map[string]string, servicePrefix string) *dynamic.Sticky {
-	cookiePrefix := servicePrefix + "sticky.cookie."
-	name := strings.TrimSpace(labels[cookiePrefix+"name"])
-	if name == "" {
+func buildSticky(source *labelcfg.Resource) *dynamic.Sticky {
+	name, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenSticky, lexer.TokenCookie, lexer.TokenName)
+	if !ok {
 		return nil
 	}
 
-	cookie := &dynamic.Cookie{Name: name}
-	if secure, ok := parseBool(labels[cookiePrefix+"secure"]); ok {
-		cookie.Secure = secure
+	config := &dynamic.Cookie{Name: name}
+	if secure, ok := source.BoolValue(lexer.TokenLoadBalancer, lexer.TokenSticky, lexer.TokenCookie, lexer.TokenSecure); ok {
+		config.Secure = secure
 	}
-	if httpOnly, ok := parseBool(labels[cookiePrefix+"httponly"]); ok {
-		cookie.HTTPOnly = httpOnly
+	if httpOnly, ok := source.BoolValue(lexer.TokenLoadBalancer, lexer.TokenSticky, lexer.TokenCookie, lexer.TokenHTTPOnly); ok {
+		config.HTTPOnly = httpOnly
 	}
-	if sameSite := strings.TrimSpace(labels[cookiePrefix+"samesite"]); sameSite != "" {
-		cookie.SameSite = sameSite
+	if sameSite, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenSticky, lexer.TokenCookie, lexer.TokenSameSite); ok {
+		config.SameSite = sameSite
 	}
 
-	return &dynamic.Sticky{Cookie: cookie}
+	return &dynamic.Sticky{Cookie: config}
 }
