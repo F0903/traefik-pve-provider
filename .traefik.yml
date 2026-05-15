@@ -1,0 +1,16 @@
+displayName: "Traefik PVE Provider"
+type: provider
+import: github.com/F0903/traefik-pve-provider
+summary: "Provision Traefik routers and services via your PVE container/vm notes."
+testData:
+  pollInterval: "60s"
+  pve:
+    endpoint: "https://pve.example.com"
+    tokenID: "root@pam!traefik"
+    token: "00000000-0000-0000-0000-000000000000"
+    timeout: "5s"
+    insecureSkipVerify: true
+    skipStopped: true
+    skipIPResolution: true
+  metadataMode: "fenced"
+  defaultDomain: "example.com"

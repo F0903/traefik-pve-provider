@@ -1,0 +1,220 @@
+# Traefik PVE Provider
+
+Provision Traefik routers and services via your PVE container/vm notes.
+
+Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider) but with simpler configuration and a larger feature-set.
+
+## Current Package Layout
+
+- `proxmox`: Proxmox VE integration.
+  - `inventory`: scanner that combines PVE API resources, parsed notes,
+    tags, and network addresses into a normalized snapshot.
+- `metadata`: parser for Traefik labels embedded in VM/container notes.
+- `traefik`: conversion from inventory snapshots to Traefik dynamic configuration.
+
+## Traefik Installation
+
+Static configuration:
+
+```yaml
+experimental:
+  plugins:
+    traefik-pve-provider:
+      moduleName: github.com/F0903/traefik-pve-provider
+      version: v0.9.0
+```
+
+Provider configuration:
+
+```yaml
+providers:
+  plugin:
+    traefik-pve-provider:
+      pollInterval: 60s
+      metadataMode: fenced
+      defaultDomain: example.com
+      pve:
+        endpoint: https://pve.example.com
+        tokenID: root@pam!traefik
+        token: your-token-secret
+        timeout: 30s
+        insecureSkipVerify: false
+        skipStopped: true
+        nodes:
+          - pve-1
+        requiredTags:
+          - traefik
+```
+
+## Notes Configuration
+
+Depending on the plugin configuration, there are two primary ways to configure the services and routes:
+
+### Traefik Fences
+
+The default and preferred method is using "traefik fences". 
+These are Markdown fenced codeblocks that contain "traefik" in the info string.
+
+In these fences, you can omit the Traefik prefix of the configuration labels, and use simpler versions of some labels.
+
+An additional benefit is that the service name is automatically derived from the VM/container name, further reducing repetition.
+
+Only the first "traefik fence" inside a note is parsed, and the rest of the note is ignored.
+Additionally, blank lines and lines starting with `#` are ignored.
+Every other line must use `key=value`. Prefixless keys are normalized as
+Traefik labels, while loose mode still requires explicit `traefik.*` labels.
+
+Example inside VM/container notes:
+
+````md
+```traefik
+enable=true
+port=8080
+middlewares=local-only@file,compress-all@file
+```
+````
+
+Additionally, with `defaultDomain` configured, an enabled workload will be automatically assigned a router and service with a `Host` rule where the workload name is a subdomain of `defaultDomain`.
+
+For example, with `defaultDomain` set to `example.com` in the plugin configuration, an enabled workload named `app` gets a
+router and service named `app`, a rule of ``Host(`app.example.com`)``. 
+Use `name=<name>` when the Proxmox name should not be used for the Traefik object name or default subdomain.
+
+#### Common Shorthand Labels
+
+- `name`: override the default router/service name.
+- `port`: backend HTTP port.
+- `scheme`: backend scheme, usually `http` or `https`.
+- `serverstransport`: HTTP servers transport reference.
+- `insecureskipverify`: generate and attach an HTTP servers transport with `insecureSkipVerify=true`.
+- `middlewares`: comma-separated HTTP router middleware references.
+- `entrypoints`: comma-separated HTTP router entry points.
+
+There are also shorthands for TCP and UDP services, some of which can be seen in the examples further down.
+
+### Full Labels
+
+The other method is using full Docker style labels like this:
+
+```
+traefik.enable=true
+traefik.http.routers.traefik.rule=Host(`traefik.poppcorn.net`)
+traefik.http.services.traefik.loadbalancer.server.port=8080
+
+traefik.http.routers.traefik.middlewares=local-only@file,compress-all@file
+```
+
+These full labels can be anywhere in the VM/container notes, as long as they start at the beginning of a line.
+
+
+## Plugin Configuration
+
+The plugin currently supports these configuration options:
+
+- `pollInterval`: how often to poll for changes in VM/container notes.
+- `metadataMode`: metadata parsing mode, supported values are:
+  - `fenced`: parse only ```` ```traefik ```` code blocks. This is the default.
+  - `loose`: parse any `traefik.*` labels found in notes.
+  - `auto`: use fenced blocks when present, otherwise fall back to loose labels.
+- `defaultDomain`: the default domain to configure services and routers under.
+- `pve`: Proxmox API and inventory discovery options.
+  - `endpoint`: the Proxmox API endpoint URL.
+  - `tokenID`: the Proxmox API token ID.
+  - `token`: the Proxmox API token.
+  - `timeout`: the Proxmox API HTTP request timeout.
+  - `insecureSkipVerify`: whether to skip TLS certificate verification for the Proxmox API endpoint.
+  - `skipStopped`: whether to skip stopped VMs/containers.
+  - `skipIPResolution`: whether to skip IP resolution for VMs/containers.
+  - `nodes`: limits which PVE nodes are scanned.
+  - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
+
+
+## Examples
+
+Basic HTTP service:
+
+````md
+```traefik
+enable=true
+port=8080
+middlewares=local-only@file,compress-all@file
+```
+````
+
+HTTPS backend with skipped backend certificate verification:
+
+````md
+```traefik
+enable=true
+scheme=https
+port=443
+insecureskipverify=true
+```
+````
+
+HTTPS backend with a file-provider servers transport:
+
+````md
+```traefik
+enable=true
+scheme=https
+port=443
+serverstransport=ignore-ssl@file
+```
+````
+
+Provider-managed servers transport:
+
+````md
+```traefik
+enable=true
+port=8443
+scheme=https
+http.services.app.loadbalancer.serverstransport=ignore-ssl
+http.serverstransports.ignore-ssl.insecureskipverify=true
+http.serverstransports.ignore-ssl.forwardingtimeouts.dialtimeout=5s
+```
+````
+
+TCP service:
+
+````md
+```traefik
+enable=true
+tcp.entrypoints=postgres
+tcp.rule=HostSNI(`pg.example.com`)
+tcp.port=5432
+```
+````
+
+Per-node Traefik instance:
+
+```yaml
+providers:
+  plugin:
+    traefik-pve-provider:
+      pve:
+        endpoint: https://pve.example.com
+        tokenID: root@pam!traefik
+        token: your-token-secret
+        nodes:
+          - pve-1
+        requiredTags:
+          - traefik
+```
+
+## Proxmox Permissions
+
+To use the PVE API, you need a dedicated token with read-only (recommended) privileges. A typical role is:
+
+```bash
+pveum role add traefik-provider -privs "VM.Audit,VM.Monitor,Sys.Audit,Datastore.Audit"
+pveum user token add root@pam traefik
+pveum acl modify / -token 'root@pam!traefik' -role traefik-provider
+```
+
+On Proxmox VE versions where guest-agent access is split out, include
+`VM.GuestAgent.Audit` so VM IP discovery can read guest-agent network
+interfaces. If `pve.skipIPResolution: true` is set, guest-agent and LXC interface
+permissions are not needed, but Traefik will need to reach the hostname
+fallbacks this provider generates.

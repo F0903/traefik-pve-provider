@@ -1,0 +1,5 @@
+# github.com/traefik/genconf v0.5.2
+## explicit; go 1.19
+github.com/traefik/genconf/dynamic
+github.com/traefik/genconf/dynamic/tls
+github.com/traefik/genconf/dynamic/types
