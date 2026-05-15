@@ -58,6 +58,7 @@ These are Markdown fenced codeblocks that contain "traefik" in the info string.
 In these fences, you can omit the Traefik prefix of the configuration labels, and use simpler versions of some labels.
 
 An additional benefit is that the service name is automatically derived from the VM/container name, further reducing repetition.
+If this is not desired, you can manually overwrite it with `name=<name>`.
 
 Only the first "traefik fence" inside a note is parsed, and the rest of the note is ignored.
 Additionally, blank lines and lines starting with `#` are ignored.
@@ -78,7 +79,6 @@ Additionally, with `defaultDomain` configured, an enabled workload will be autom
 
 For example, with `defaultDomain` set to `example.com` in the plugin configuration, an enabled workload named `app` gets a
 router and service named `app`, a rule of ``Host(`app.example.com`)``. 
-Use `name=<name>` when the Proxmox name should not be used for the Traefik object name or default subdomain.
 
 #### Common Shorthand Labels
 
