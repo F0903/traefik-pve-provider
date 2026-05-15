@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	defaultPollInterval = 60 * time.Second
-	defaultPVETimeout   = 30 * time.Second
-	minPollInterval     = 5 * time.Second
+	defaultPollInterval      = 60 * time.Second
+	defaultPVETimeout        = 30 * time.Second
+	defaultPVEMaxConcurrency = 4
+	minPollInterval          = 5 * time.Second
 )
 
 type Config struct {
@@ -30,6 +31,7 @@ type PVEConfig struct {
 	SkipIPResolution   bool     `json:"skipIPResolution,omitempty" yaml:"skipIPResolution,omitempty" toml:"skipIPResolution,omitempty"`
 	Nodes              []string `json:"nodes,omitempty" yaml:"nodes,omitempty" toml:"nodes,omitempty"`
 	RequiredTags       []string `json:"requiredTags,omitempty" yaml:"requiredTags,omitempty" toml:"requiredTags,omitempty"`
+	MaxConcurrency     int      `json:"maxConcurrency,omitempty" yaml:"maxConcurrency,omitempty" toml:"maxConcurrency,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -37,8 +39,9 @@ func CreateConfig() *Config {
 		PollInterval: defaultPollInterval.String(),
 		MetadataMode: string(metadata.ModeFenced),
 		PVE: PVEConfig{
-			Timeout:     defaultPVETimeout.String(),
-			SkipStopped: true,
+			Timeout:        defaultPVETimeout.String(),
+			SkipStopped:    true,
+			MaxConcurrency: defaultPVEMaxConcurrency,
 		},
 	}
 }

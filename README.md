@@ -40,6 +40,7 @@ providers:
         timeout: 30s
         insecureSkipVerify: false
         skipStopped: true
+        maxConcurrency: 4
         nodes:
           - pve-1
         requiredTags:
@@ -125,6 +126,7 @@ The plugin currently supports these configuration options:
   - `insecureSkipVerify`: whether to skip TLS certificate verification for the Proxmox API endpoint.
   - `skipStopped`: whether to skip stopped VMs/containers.
   - `skipIPResolution`: whether to skip IP resolution for VMs/containers.
+  - `maxConcurrency`: maximum concurrent per-guest PVE API calls during scans.
   - `nodes`: limits which PVE nodes are scanned.
   - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
 

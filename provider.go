@@ -79,6 +79,7 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 			MetadataMode:     metadataMode,
 			Nodes:            pveConfig.Nodes,
 			RequiredTags:     pveConfig.RequiredTags,
+			MaxConcurrency:   pveConfig.MaxConcurrency,
 		}),
 		configOptions: traefik.Options{
 			DefaultDomain: config.DefaultDomain,

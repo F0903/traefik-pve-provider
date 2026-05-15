@@ -22,6 +22,7 @@ func TestNewAcceptsCatalogTestDataShape(t *testing.T) {
 			InsecureSkipVerify: true,
 			SkipStopped:        true,
 			SkipIPResolution:   true,
+			MaxConcurrency:     4,
 		},
 		MetadataMode:  "fenced",
 		DefaultDomain: "example.com",

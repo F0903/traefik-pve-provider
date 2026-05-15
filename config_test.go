@@ -17,4 +17,7 @@ func TestCreateConfig(t *testing.T) {
 	if !cfg.PVE.SkipStopped {
 		t.Fatal("PVE.SkipStopped = false")
 	}
+	if cfg.PVE.MaxConcurrency != 4 {
+		t.Fatalf("PVE.MaxConcurrency = %d", cfg.PVE.MaxConcurrency)
+	}
 }

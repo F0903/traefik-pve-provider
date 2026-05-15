@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/proxmox"
 )
+
+const defaultMaxConcurrency = 4
 
 type ProxmoxAPI interface {
 	Nodes(ctx context.Context) ([]proxmox.Node, error)
@@ -26,23 +29,40 @@ type ScanOptions struct {
 	MetadataMode     metadata.Mode
 	Nodes            []string
 	RequiredTags     []string
+	MaxConcurrency   int
 }
 
 type Scanner struct {
-	api     ProxmoxAPI
-	parser  metadata.Parser
-	options ScanOptions
+	api               ProxmoxAPI
+	parser            metadata.Parser
+	options           ScanOptions
+	includedNodeNames []string
+	includedNodes     map[string]bool
+	requiredTags      []string
+	maxConcurrency    int
 }
 
 func NewScanner(api ProxmoxAPI, options ScanOptions) *Scanner {
 	return &Scanner{
-		api:     api,
-		parser:  metadata.Parser{Prefix: metadata.DefaultPrefix, Mode: options.MetadataMode},
-		options: options,
+		api:               api,
+		parser:            metadata.Parser{Prefix: metadata.DefaultPrefix, Mode: options.MetadataMode},
+		options:           options,
+		includedNodeNames: normalizedNodeNames(options.Nodes),
+		includedNodes:     normalizedSet(options.Nodes),
+		requiredTags:      normalizedList(options.RequiredTags),
+		maxConcurrency:    normalizedMaxConcurrency(options.MaxConcurrency),
 	}
 }
 
 func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
+	if len(s.includedNodeNames) > 0 {
+		snapshot := Snapshot{}
+		for _, node := range s.includedNodeNames {
+			s.scanNode(ctx, node, &snapshot)
+		}
+		return snapshot, nil
+	}
+
 	nodes, err := s.api.Nodes(ctx)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("list nodes: %w", err)
@@ -67,15 +87,7 @@ func (s *Scanner) scanNode(ctx context.Context, node string, snapshot *Snapshot)
 	if err != nil {
 		snapshot.Problems = append(snapshot.Problems, problem(node, KindVM, 0, "list", err))
 	} else {
-		for _, vm := range vms {
-			if s.options.SkipStopped && vm.Status != "running" {
-				continue
-			}
-			workload := s.scanVM(ctx, node, vm)
-			if s.matchesRequiredTags(workload.Tags) {
-				snapshot.Workloads = append(snapshot.Workloads, workload)
-			}
-		}
+		snapshot.Workloads = append(snapshot.Workloads, s.scanVMs(ctx, node, vms)...)
 	}
 
 	containers, err := s.api.Containers(ctx, node)
@@ -84,15 +96,63 @@ func (s *Scanner) scanNode(ctx context.Context, node string, snapshot *Snapshot)
 		return
 	}
 
-	for _, container := range containers {
-		if s.options.SkipStopped && container.Status != "running" {
+	snapshot.Workloads = append(snapshot.Workloads, s.scanContainers(ctx, node, containers)...)
+}
+
+func (s *Scanner) scanVMs(ctx context.Context, node string, resources []proxmox.Resource) []Workload {
+	vms := s.filteredResources(resources)
+	return s.scanWorkloads(len(vms), func(index int) Workload {
+		return s.scanVM(ctx, node, vms[index])
+	})
+}
+
+func (s *Scanner) scanContainers(ctx context.Context, node string, resources []proxmox.Resource) []Workload {
+	containers := s.filteredResources(resources)
+	return s.scanWorkloads(len(containers), func(index int) Workload {
+		return s.scanContainer(ctx, node, containers[index])
+	})
+}
+
+func (s *Scanner) filteredResources(resources []proxmox.Resource) []proxmox.Resource {
+	filtered := make([]proxmox.Resource, 0, len(resources))
+	for _, resource := range resources {
+		if s.options.SkipStopped && resource.Status != "running" {
 			continue
 		}
-		workload := s.scanContainer(ctx, node, container)
-		if s.matchesRequiredTags(workload.Tags) {
-			snapshot.Workloads = append(snapshot.Workloads, workload)
+		if !s.matchesRequiredTags(splitTags(resource.Tags)) {
+			continue
 		}
+		filtered = append(filtered, resource)
 	}
+	return filtered
+}
+
+func (s *Scanner) scanWorkloads(count int, scan func(index int) Workload) []Workload {
+	if count == 0 {
+		return nil
+	}
+
+	workloads := make([]Workload, count)
+	if count == 1 || s.maxConcurrency <= 1 {
+		for index := range count {
+			workloads[index] = scan(index)
+		}
+		return workloads
+	}
+
+	limit := min(s.maxConcurrency, count)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, limit)
+	for index := range count {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			workloads[index] = scan(index)
+		})
+	}
+	wg.Wait()
+	return workloads
 }
 
 func (s *Scanner) scanVM(ctx context.Context, node string, resource proxmox.Resource) Workload {
@@ -105,7 +165,7 @@ func (s *Scanner) scanVM(ctx context.Context, node string, resource proxmox.Reso
 	}
 	s.applyConfig(&workload, cfg)
 
-	if !s.options.SkipIPResolution && resource.Status == "running" {
+	if s.shouldResolveIPs(workload, resource.Status) {
 		interfaces, err := s.api.VMNetworkInterfaces(ctx, node, resource.VMID)
 		if err != nil {
 			workload.Problems = append(workload.Problems, interfaceProblem(node, KindVM, resource.VMID, err))
@@ -127,7 +187,7 @@ func (s *Scanner) scanContainer(ctx context.Context, node string, resource proxm
 	}
 	s.applyConfig(&workload, cfg)
 
-	if !s.options.SkipIPResolution && resource.Status == "running" {
+	if s.shouldResolveIPs(workload, resource.Status) {
 		interfaces, err := s.api.ContainerInterfaces(ctx, node, resource.VMID)
 		if err != nil {
 			workload.Problems = append(workload.Problems, interfaceProblem(node, KindContainer, resource.VMID, err))
@@ -155,20 +215,19 @@ func (s *Scanner) applyConfig(workload *Workload, cfg proxmox.GuestConfig) {
 	workload.LabelDiagnostics = parsed.Diagnostics
 }
 
+func (s *Scanner) shouldResolveIPs(workload Workload, status string) bool {
+	return !s.options.SkipIPResolution && status == "running" && labelsEnableTraefik(workload.TraefikLabels)
+}
+
 func (s *Scanner) includedNode(node string) bool {
-	if len(s.options.Nodes) == 0 {
+	if len(s.includedNodes) == 0 {
 		return true
 	}
-	for _, included := range s.options.Nodes {
-		if strings.EqualFold(strings.TrimSpace(included), node) {
-			return true
-		}
-	}
-	return false
+	return s.includedNodes[strings.ToLower(strings.TrimSpace(node))]
 }
 
 func (s *Scanner) matchesRequiredTags(tags []string) bool {
-	if len(s.options.RequiredTags) == 0 {
+	if len(s.requiredTags) == 0 {
 		return true
 	}
 
@@ -176,11 +235,7 @@ func (s *Scanner) matchesRequiredTags(tags []string) bool {
 	for _, tag := range tags {
 		tagSet[strings.ToLower(tag)] = true
 	}
-	for _, required := range s.options.RequiredTags {
-		required = strings.ToLower(strings.TrimSpace(required))
-		if required == "" {
-			continue
-		}
+	for _, required := range s.requiredTags {
 		if !tagSet[required] {
 			return false
 		}
@@ -216,6 +271,70 @@ func splitTags(tags string) []string {
 		}
 	}
 	return result
+}
+
+func normalizedNodeNames(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func normalizedSet(values []string) map[string]bool {
+	list := normalizedList(values)
+	if len(list) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(list))
+	for _, value := range list {
+		set[value] = true
+	}
+	return set
+}
+
+func normalizedList(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func normalizedMaxConcurrency(value int) int {
+	if value <= 0 {
+		return defaultMaxConcurrency
+	}
+	return value
+}
+
+func labelsEnableTraefik(labels map[string]string) bool {
+	enabled, ok := parseBool(labels["traefik.enable"])
+	return ok && enabled
+}
+
+func parseBool(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1", "yes", "on":
+		return true, true
+	case "false", "0", "no", "off":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func problem(node string, kind Kind, id int, stage string, err error) Problem {

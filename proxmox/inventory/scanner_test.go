@@ -3,13 +3,21 @@ package inventory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/F0903/traefik-pve-provider/proxmox"
 )
 
+var fakeAPICallsMu sync.Mutex
+
 type fakeAPI struct {
+	calls                 map[string]int
+	configHook            func(int)
+	nodesErr              error
 	nodes                 []proxmox.Node
 	vms                   map[string][]proxmox.Resource
 	containers            map[string][]proxmox.Resource
@@ -23,18 +31,28 @@ type fakeAPI struct {
 }
 
 func (f fakeAPI) Nodes(ctx context.Context) ([]proxmox.Node, error) {
+	f.recordCall("nodes")
+	if f.nodesErr != nil {
+		return nil, f.nodesErr
+	}
 	return f.nodes, nil
 }
 
 func (f fakeAPI) VirtualMachines(ctx context.Context, node string) ([]proxmox.Resource, error) {
+	f.recordCall("vms:" + node)
 	return f.vms[node], nil
 }
 
 func (f fakeAPI) Containers(ctx context.Context, node string) ([]proxmox.Resource, error) {
+	f.recordCall("containers:" + node)
 	return f.containers[node], nil
 }
 
 func (f fakeAPI) VMConfig(ctx context.Context, node string, vmid int) (proxmox.GuestConfig, error) {
+	f.recordCall(fmt.Sprintf("vm-config:%d", vmid))
+	if f.configHook != nil {
+		f.configHook(vmid)
+	}
 	if err := f.configErr[vmid]; err != nil {
 		return proxmox.GuestConfig{}, err
 	}
@@ -42,6 +60,10 @@ func (f fakeAPI) VMConfig(ctx context.Context, node string, vmid int) (proxmox.G
 }
 
 func (f fakeAPI) ContainerConfig(ctx context.Context, node string, vmid int) (proxmox.GuestConfig, error) {
+	f.recordCall(fmt.Sprintf("container-config:%d", vmid))
+	if f.configHook != nil {
+		f.configHook(vmid)
+	}
 	if err := f.configErr[vmid]; err != nil {
 		return proxmox.GuestConfig{}, err
 	}
@@ -49,6 +71,7 @@ func (f fakeAPI) ContainerConfig(ctx context.Context, node string, vmid int) (pr
 }
 
 func (f fakeAPI) VMNetworkInterfaces(ctx context.Context, node string, vmid int) (proxmox.GuestAgentInterfaces, error) {
+	f.recordCall(fmt.Sprintf("vm-interfaces:%d", vmid))
 	if err := f.vmInterfaceErr[vmid]; err != nil {
 		return proxmox.GuestAgentInterfaces{}, err
 	}
@@ -56,10 +79,19 @@ func (f fakeAPI) VMNetworkInterfaces(ctx context.Context, node string, vmid int)
 }
 
 func (f fakeAPI) ContainerInterfaces(ctx context.Context, node string, vmid int) ([]proxmox.NetworkInterface, error) {
+	f.recordCall(fmt.Sprintf("container-interfaces:%d", vmid))
 	if err := f.containerInterfaceErr[vmid]; err != nil {
 		return nil, err
 	}
 	return f.containerInterfaces[vmid], nil
+}
+
+func (f fakeAPI) recordCall(key string) {
+	if f.calls != nil {
+		fakeAPICallsMu.Lock()
+		defer fakeAPICallsMu.Unlock()
+		f.calls[key]++
+	}
 }
 
 func TestScannerBuildsWorkloadSnapshot(t *testing.T) {
@@ -257,6 +289,193 @@ func TestScannerCanFilterNodesAndRequiredTags(t *testing.T) {
 	}
 }
 
+func TestScannerSkipsNodeListingWhenNodesConfigured(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls:    calls,
+		nodesErr: errors.New("nodes should not be listed"),
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "web", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=true\n```"},
+		},
+		containerConfigs:    map[int]proxmox.GuestConfig{},
+		vmInterfaces:        map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := NewScanner(api, ScanOptions{
+		SkipIPResolution: true,
+		Nodes:            []string{"pve-1"},
+	})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if calls["nodes"] != 0 {
+		t.Fatalf("nodes calls = %d, want 0", calls["nodes"])
+	}
+	if calls["vms:pve-1"] != 1 {
+		t.Fatalf("vm list calls = %d, want 1", calls["vms:pve-1"])
+	}
+	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].ID != 100 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerFiltersRequiredTagsBeforeGuestCalls(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls: calls,
+		nodes: []proxmox.Node{{Name: "pve-1", Status: "online"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {
+				{VMID: 100, Name: "db", Status: "running", Tags: "prod"},
+				{VMID: 101, Name: "web", Status: "running", Tags: "traefik;prod"},
+			},
+		},
+		containers: map[string][]proxmox.Resource{
+			"pve-1": {
+				{VMID: 200, Name: "cache", Status: "running", Tags: "prod"},
+			},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			101: {Description: "```traefik\nenable=true\n```"},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{
+			101: {
+				Result: []proxmox.NetworkInterface{{Name: "eth0", IPAddresses: []proxmox.IPAddress{{Address: "10.0.0.10", Type: "ipv4"}}}},
+			},
+		},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := NewScanner(api, ScanOptions{RequiredTags: []string{"traefik"}})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].ID != 101 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+	if calls["vm-config:100"] != 0 || calls["vm-interfaces:100"] != 0 {
+		t.Fatalf("excluded vm calls: config=%d interfaces=%d", calls["vm-config:100"], calls["vm-interfaces:100"])
+	}
+	if calls["container-config:200"] != 0 || calls["container-interfaces:200"] != 0 {
+		t.Fatalf("excluded container calls: config=%d interfaces=%d", calls["container-config:200"], calls["container-interfaces:200"])
+	}
+	if calls["vm-config:101"] != 1 || calls["vm-interfaces:101"] != 1 {
+		t.Fatalf("included vm calls: config=%d interfaces=%d", calls["vm-config:101"], calls["vm-interfaces:101"])
+	}
+}
+
+func TestScannerSkipsInterfaceLookupForDisabledWorkloads(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls: calls,
+		nodes: []proxmox.Node{{Name: "pve-1", Status: "online"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "disabled", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=false\n```"},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		vmInterfaceErr: map[int]error{
+			100: errors.New("interfaces should not be fetched"),
+		},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := NewScanner(api, ScanOptions{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].ID != 100 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+	if calls["vm-interfaces:100"] != 0 {
+		t.Fatalf("interface calls = %d, want 0", calls["vm-interfaces:100"])
+	}
+	if len(snapshot.Workloads[0].Problems) != 0 {
+		t.Fatalf("problems = %#v", snapshot.Workloads[0].Problems)
+	}
+}
+
+func TestScannerLimitsConcurrentGuestConfigCalls(t *testing.T) {
+	var mu sync.Mutex
+	active := 0
+	maxActive := 0
+	configHook := func(int) {
+		mu.Lock()
+		active++
+		if active > maxActive {
+			maxActive = active
+		}
+		mu.Unlock()
+
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		active--
+		mu.Unlock()
+	}
+
+	api := fakeAPI{
+		configHook: configHook,
+		nodes:      []proxmox.Node{{Name: "pve-1", Status: "online"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {
+				{VMID: 100, Name: "vm-1", Status: "running"},
+				{VMID: 101, Name: "vm-2", Status: "running"},
+				{VMID: 102, Name: "vm-3", Status: "running"},
+				{VMID: 103, Name: "vm-4", Status: "running"},
+			},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {}, 101: {}, 102: {}, 103: {},
+		},
+		containerConfigs:    map[int]proxmox.GuestConfig{},
+		vmInterfaces:        map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := NewScanner(api, ScanOptions{SkipIPResolution: true, MaxConcurrency: 2})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if len(snapshot.Workloads) != 4 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+	if maxActive > 2 {
+		t.Fatalf("max active config calls = %d, want at most 2", maxActive)
+	}
+	if maxActive < 2 {
+		t.Fatalf("max active config calls = %d, want concurrency to be used", maxActive)
+	}
+	for index, workload := range snapshot.Workloads {
+		wantID := 100 + index
+		if workload.ID != wantID {
+			t.Fatalf("workload order at %d = %d, want %d", index, workload.ID, wantID)
+		}
+	}
+}
+
 func TestScannerUsesContainerHostnameFromConfig(t *testing.T) {
 	api := fakeAPI{
 		nodes: []proxmox.Node{{Name: "pve-1", Status: "online"}},
@@ -290,8 +509,10 @@ func TestScannerAddsPermissionHintForForbiddenInterfaceLookup(t *testing.T) {
 		vms: map[string][]proxmox.Resource{
 			"pve-1": {{VMID: 100, Name: "vm", Status: "running"}},
 		},
-		containers:       map[string][]proxmox.Resource{},
-		vmConfigs:        map[int]proxmox.GuestConfig{100: {}},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=true\n```"},
+		},
 		containerConfigs: map[int]proxmox.GuestConfig{},
 		vmInterfaceErr: map[int]error{
 			100: &proxmox.APIError{Method: "GET", Path: "/agent/network-get-interfaces", StatusCode: 403},
