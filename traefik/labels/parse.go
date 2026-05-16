@@ -8,6 +8,12 @@ import (
 	"github.com/F0903/traefik-pve-provider/traefik/ast/parser"
 )
 
+type Diagnostic struct {
+	Key   string
+	Value string
+	Err   *parser.ParseError
+}
+
 func Enabled(labels map[string]string) bool {
 	keys := make([]string, 0, len(labels))
 	for key := range labels {

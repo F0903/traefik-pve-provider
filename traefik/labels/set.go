@@ -5,22 +5,27 @@ import (
 	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 )
 
+type Set struct {
+	assignments []labelAssignment
+	values      map[labelPathKey]indexedValue
+
+	explicitHTTP bool
+	explicitTCP  bool
+	explicitUDP  bool
+
+	HTTP ProtocolSet
+	TCP  ProtocolSet
+	UDP  ProtocolSet
+}
+
 func newLabelSet() *Set {
-	set := &Set{}
+	set := &Set{
+		values: make(map[labelPathKey]indexedValue),
+	}
 	set.HTTP = newLabelProtocolSet(set, lexer.TokenHTTP)
 	set.TCP = newLabelProtocolSet(set, lexer.TokenTCP)
 	set.UDP = newLabelProtocolSet(set, lexer.TokenUDP)
 	return set
-}
-
-func newLabelProtocolSet(labels *Set, protocol lexer.TokenType) ProtocolSet {
-	return ProtocolSet{
-		labels:            labels,
-		protocol:          protocol,
-		Routers:           make(map[string]*Resource),
-		Services:          make(map[string]*Resource),
-		ServersTransports: make(map[string]*Resource),
-	}
 }
 
 func (s *Set) observeTokens(tokens []lexer.Token) {
@@ -76,19 +81,26 @@ func (s *Set) applyAssignment(assignment ast.Assignment, origin labelAssignmentO
 
 func (s *Set) indexAssignment(assignment labelAssignment) {
 	segments := assignment.assignment.Target.Segments()
-	if len(segments) < 4 || segments[2].Type != lexer.TokenIdentifier || segments[2].Lexeme == "" {
+	value, hasValue := assignmentValue(assignment.assignment.Value)
+	if len(segments) == 1 {
+		if hasValue {
+			putIndexedValue(s.values, pathKeyForSegments(segments), value, assignment.origin)
+		}
 		return
 	}
 
-	protocol := s.protocolSet(protocolForSegment(segments[0].Type))
-	switch segments[1].Type {
-	case lexer.TokenRouters:
-		protocol.router(segments[2].Lexeme, assignment.origin)
-	case lexer.TokenServices:
-		protocol.service(segments[2].Lexeme, assignment.origin)
-	case lexer.TokenServersTransports:
-		protocol.serversTransport(segments[2].Lexeme, assignment.origin)
+	resource := s.resourceForSegments(segments, assignment.origin)
+	if resource == nil {
+		return
 	}
+	if !hasValue {
+		return
+	}
+
+	rest := segments[3:]
+	putIndexedValue(resource.values, pathKeyForSegments(rest), value, assignment.origin)
+	resource.indexHeader(rest, value, assignment.origin)
+	resource.indexTLSDomain(rest, value, assignment.origin)
 }
 
 func (s *Set) applyNameOverride(defaultName string) {
@@ -107,6 +119,8 @@ func (s *Set) applyNameOverride(defaultName string) {
 }
 
 func (s *Set) rebuildResourceIndexes() {
+	s.values = make(map[labelPathKey]indexedValue)
+
 	httpRouters := s.HTTP.explicitRouters
 	httpServices := s.HTTP.explicitServices
 	httpTransports := s.HTTP.explicitServersTransports
@@ -135,6 +149,28 @@ func (s *Set) rebuildResourceIndexes() {
 	}
 }
 
+func (s *Set) resourceForSegments(segments []ast.Segment, origin labelAssignmentOrigin) *Resource {
+	if len(segments) < 4 || segments[2].Type != lexer.TokenIdentifier || segments[2].Lexeme == "" {
+		return nil
+	}
+
+	prot, err := protocolForSegment(segments[0].Type)
+	if err != nil {
+		return nil
+	}
+	protocol := s.protocolSet(prot)
+	switch segments[1].Type {
+	case lexer.TokenRouters:
+		return protocol.router(segments[2].Lexeme, origin)
+	case lexer.TokenServices:
+		return protocol.service(segments[2].Lexeme, origin)
+	case lexer.TokenServersTransports:
+		return protocol.serversTransport(segments[2].Lexeme, origin)
+	default:
+		return nil
+	}
+}
+
 func renamedDefaultTarget(target *ast.Target, from, to string) *ast.Target {
 	segments := target.Segments()
 	if len(segments) < 3 ||
@@ -144,82 +180,4 @@ func renamedDefaultTarget(target *ast.Target, from, to string) *ast.Target {
 	}
 	segments[2].Lexeme = to
 	return ast.NewTarget(segments...)
-}
-
-func protocolForSegment(tokenType lexer.TokenType) labelProtocol {
-	switch tokenType {
-	case lexer.TokenTCP:
-		return labelProtocolTCP
-	case lexer.TokenUDP:
-		return labelProtocolUDP
-	default:
-		return labelProtocolHTTP
-	}
-}
-
-func (s *Set) protocolSet(protocol labelProtocol) *ProtocolSet {
-	switch protocol {
-	case labelProtocolTCP:
-		return &s.TCP
-	case labelProtocolUDP:
-		return &s.UDP
-	default:
-		return &s.HTTP
-	}
-}
-
-func (s *ProtocolSet) observeTokens(tokens []lexer.Token) {
-	if !isNamedProtocolObject(tokens) {
-		return
-	}
-
-	switch tokenTypeAt(tokens, 4) {
-	case lexer.TokenRouters:
-		s.explicitRouters = true
-	case lexer.TokenServices:
-		s.explicitServices = true
-	case lexer.TokenServersTransports:
-		s.explicitServersTransports = true
-	}
-}
-
-func (s ProtocolSet) RouterNames() ([]string, bool) {
-	return sortedExplicitLabelResourceNames(s.Routers), s.explicitRouters
-}
-
-func (s ProtocolSet) ServiceNames() ([]string, bool) {
-	return sortedExplicitLabelResourceNames(s.Services), s.explicitServices
-}
-
-func (s ProtocolSet) ServersTransportNames() ([]string, bool) {
-	return sortedExplicitLabelResourceNames(s.ServersTransports), s.explicitServersTransports
-}
-
-func (s *ProtocolSet) router(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.Routers, lexer.TokenRouters, name, origin)
-}
-
-func (s *ProtocolSet) service(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.Services, lexer.TokenServices, name, origin)
-}
-
-func (s *ProtocolSet) serversTransport(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.ServersTransports, lexer.TokenServersTransports, name, origin)
-}
-
-func (s *ProtocolSet) namedResource(objects map[string]*Resource, collection lexer.TokenType, name string, origin labelAssignmentOrigin) *Resource {
-	resource := objects[name]
-	if resource == nil {
-		resource = &Resource{
-			labels:     s.labels,
-			protocol:   s.protocol,
-			collection: collection,
-			name:       name,
-		}
-		objects[name] = resource
-	}
-	if origin == labelAssignmentOriginExplicit {
-		resource.explicit = true
-	}
-	return resource
 }

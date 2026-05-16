@@ -6,6 +6,11 @@ import (
 	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 )
 
+type TLSDomain struct {
+	Main string
+	SANs []string
+}
+
 func (s *Set) StringValue(tokenType lexer.TokenType) (string, bool) {
 	value, ok := s.value(tokenType)
 	typed, isString := value.(string)
@@ -22,23 +27,11 @@ func (s *Set) BoolValue(tokenType lexer.TokenType) (bool, bool) {
 }
 
 func (s *Set) value(tokenType lexer.TokenType) (any, bool) {
-	var selected labelAssignment
-	found := false
-	for _, assignment := range s.assignments {
-		segments := assignment.assignment.Target.Segments()
-		if len(segments) != 1 || segments[0].Type != tokenType {
-			continue
-		}
-		if found && selected.origin > assignment.origin {
-			continue
-		}
-		selected = assignment
-		found = true
-	}
-	if !found {
+	value, ok := s.values[pathKeyForTypes([]lexer.TokenType{tokenType})]
+	if !ok {
 		return nil, false
 	}
-	return assignmentValue(selected.assignment.Value)
+	return value.value, true
 }
 
 func (s *Resource) StringValue(path ...lexer.TokenType) (string, bool) {
@@ -72,53 +65,23 @@ func (s *Resource) ListValue(path ...lexer.TokenType) ([]string, bool) {
 }
 
 func (s *Resource) value(path ...lexer.TokenType) (any, bool) {
-	if s == nil || s.labels == nil {
+	if s == nil {
 		return nil, false
 	}
 
-	var selected labelAssignment
-	found := false
-	for _, assignment := range s.labels.assignments {
-		rest, ok := assignment.objectPath(s)
-		if !ok || !segmentTypesEqual(rest, path) {
-			continue
-		}
-		if found && selected.origin > assignment.origin {
-			continue
-		}
-		selected = assignment
-		found = true
-	}
-	if !found {
+	value, ok := s.values[pathKeyForTypes(path)]
+	if !ok {
 		return nil, false
 	}
-	return assignmentValue(selected.assignment.Value)
+	return value.value, true
 }
 
 func (s *Resource) Headers(path ...lexer.TokenType) map[string]string {
-	values := make(map[string]labelNamedValue)
-	for _, assignment := range s.assignmentsWithPrefix(path...) {
-		rest, ok := assignment.objectPath(s)
-		if !ok || len(rest) != len(path)+1 {
-			continue
-		}
-		name := rest[len(path)]
-		if name.Type != lexer.TokenIdentifier || name.Lexeme == "" {
-			continue
-		}
-		value, ok := assignmentValue(assignment.assignment.Value)
-		if !ok {
-			continue
-		}
-		headerValue, ok := value.(string)
-		if !ok {
-			continue
-		}
-		if existing, exists := values[name.Lexeme]; exists && existing.origin > assignment.origin {
-			continue
-		}
-		values[name.Lexeme] = labelNamedValue{value: headerValue, origin: assignment.origin}
+	if s == nil {
+		return nil
 	}
+
+	values := s.headers[pathKeyForTypes(path)]
 	if len(values) == 0 {
 		return nil
 	}
@@ -131,55 +94,11 @@ func (s *Resource) Headers(path ...lexer.TokenType) map[string]string {
 }
 
 func (s *Resource) TLSDomains(path ...lexer.TokenType) []TLSDomain {
-	domains := make(map[int]*TLSDomain)
-	origins := make(map[int]map[lexer.TokenType]labelAssignmentOrigin)
-	domainPath := append(append([]lexer.TokenType{}, path...), lexer.TokenDomains)
-
-	for _, assignment := range s.assignmentsWithPrefix(domainPath...) {
-		rest, ok := assignment.objectPath(s)
-		if !ok || len(rest) != len(path)+2 || rest[len(path)].Type != lexer.TokenDomains {
-			continue
-		}
-		index, ok := rest[len(path)].Value.(int)
-		if !ok {
-			continue
-		}
-		field := rest[len(path)+1].Type
-		if field != lexer.TokenMain && field != lexer.TokenSANs {
-			continue
-		}
-		if origins[index] == nil {
-			origins[index] = make(map[lexer.TokenType]labelAssignmentOrigin)
-		}
-		if existing, exists := origins[index][field]; exists && existing > assignment.origin {
-			continue
-		}
-		value, ok := assignmentValue(assignment.assignment.Value)
-		if !ok {
-			continue
-		}
-
-		domain := domains[index]
-		if domain == nil {
-			domain = &TLSDomain{}
-			domains[index] = domain
-		}
-		switch field {
-		case lexer.TokenMain:
-			main, ok := value.(string)
-			if ok {
-				domain.Main = main
-				origins[index][field] = assignment.origin
-			}
-		case lexer.TokenSANs:
-			sans, ok := value.([]string)
-			if ok {
-				domain.SANs = sans
-				origins[index][field] = assignment.origin
-			}
-		}
+	if s == nil {
+		return nil
 	}
 
+	domains := s.tlsDomains[pathKeyForTypes(path)]
 	if len(domains) == 0 {
 		return nil
 	}
@@ -192,7 +111,11 @@ func (s *Resource) TLSDomains(path ...lexer.TokenType) []TLSDomain {
 
 	result := make([]TLSDomain, 0, len(indices))
 	for _, index := range indices {
-		result = append(result, *domains[index])
+		domain := domains[index]
+		result = append(result, TLSDomain{
+			Main: domain.main,
+			SANs: domain.sans,
+		})
 	}
 	return result
 }
