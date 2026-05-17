@@ -3,6 +3,7 @@
 Automatically provision Traefik routers and services via your PVE container/vm notes.
 
 Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider) but with simpler configuration and a larger feature-set.
+> Note that this is not a fork, but a fully from-scratch project.
 
 ## Current Package Layout
 
