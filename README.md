@@ -40,9 +40,9 @@ providers:
           - traefik
 ```
 
-## Notes Configuration
+## Usage
 
-Depending on the plugin configuration, there are two primary ways to configure the services and routes:
+Depending on the plugin configuration, there are two primary ways to configure the services and routers:
 
 ### Traefik Fences
 
