@@ -67,6 +67,42 @@ func TestClientDoesNotDoubleAppendAPIPath(t *testing.T) {
 	}
 }
 
+func TestClientRequestsClusterResourcesWithTypeFilter(t *testing.T) {
+	var gotPath string
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"type":"qemu","node":"pve-1","vmid":100,"name":"app","status":"running","tags":"traefik"}]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		Endpoint: server.URL,
+		TokenID:  "root@pam!traefik",
+		Token:    "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	resources, err := client.ClusterResources(context.Background())
+	if err != nil {
+		t.Fatalf("ClusterResources() error = %v", err)
+	}
+
+	if gotPath != "/api2/json/cluster/resources" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "type=vm" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if len(resources) != 1 || resources[0].Type != "qemu" || resources[0].Node != "pve-1" || resources[0].VMID != 100 {
+		t.Fatalf("resources = %#v", resources)
+	}
+}
+
 func TestClientReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "permission denied", http.StatusForbidden)

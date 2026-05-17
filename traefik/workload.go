@@ -5,12 +5,12 @@ import (
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
-func (b *configBuilder) addHTTPWorkload(workload inventory.Workload, labels *labelcfg.Set) {
+func (b *configBuilder) addHTTPWorkload(workload inventory.Workload, names GeneratedNames, labels *labelcfg.Set) {
 	routerNames, hasExplicitRouters := labels.HTTP.RouterNames()
 	serviceNames, hasExplicitServices := labels.HTTP.ServiceNames()
 	transportNames, hasExplicitTransports := labels.HTTP.ServersTransportNames()
 	transportNames, _ = b.claimObjectNames(workload, transportNames, hasExplicitTransports, b.httpTransports, "HTTP servers transport")
-	defaultName := defaultObjectName(workload, labels)
+	defaultName := defaultObjectName(names, labels)
 
 	if len(routerNames) == 0 && !hasExplicitRouters {
 		routerNames = []string{b.claimDefaultObjectName(defaultName, workload, b.httpRouters, "HTTP router")}
@@ -41,12 +41,12 @@ func (b *configBuilder) addHTTPWorkload(workload inventory.Workload, labels *lab
 	}
 }
 
-func (b *configBuilder) addTCPWorkload(workload inventory.Workload, labels *labelcfg.Set) {
+func (b *configBuilder) addTCPWorkload(workload inventory.Workload, names GeneratedNames, labels *labelcfg.Set) {
 	routerNames, hasExplicitRouters := labels.TCP.RouterNames()
 	routerNames, hasExplicitRouters = b.claimObjectNames(workload, routerNames, hasExplicitRouters, b.tcpRouters, "TCP router")
 	serviceNames, hasExplicitServices := labels.TCP.ServiceNames()
 	serviceNames, hasExplicitServices = b.claimObjectNames(workload, serviceNames, hasExplicitServices, b.tcpServices, "TCP service")
-	defaultName := defaultObjectName(workload, labels)
+	defaultName := defaultObjectName(names, labels)
 
 	if len(routerNames) == 0 && !hasExplicitRouters {
 		routerNames = []string{b.claimDefaultObjectName(defaultName, workload, b.tcpRouters, "TCP router")}
@@ -71,12 +71,12 @@ func (b *configBuilder) addTCPWorkload(workload inventory.Workload, labels *labe
 	}
 }
 
-func (b *configBuilder) addUDPWorkload(workload inventory.Workload, labels *labelcfg.Set) {
+func (b *configBuilder) addUDPWorkload(workload inventory.Workload, names GeneratedNames, labels *labelcfg.Set) {
 	routerNames, hasExplicitRouters := labels.UDP.RouterNames()
 	routerNames, hasExplicitRouters = b.claimObjectNames(workload, routerNames, hasExplicitRouters, b.udpRouters, "UDP router")
 	serviceNames, hasExplicitServices := labels.UDP.ServiceNames()
 	serviceNames, hasExplicitServices = b.claimObjectNames(workload, serviceNames, hasExplicitServices, b.udpServices, "UDP service")
-	defaultName := defaultObjectName(workload, labels)
+	defaultName := defaultObjectName(names, labels)
 
 	if len(routerNames) == 0 && !hasExplicitRouters {
 		routerNames = []string{b.claimDefaultObjectName(defaultName, workload, b.udpRouters, "UDP router")}

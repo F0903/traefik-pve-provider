@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +99,22 @@ func TestPublishSkipsScanError(t *testing.T) {
 	}
 }
 
+func TestPublishConfigurationReturnsWhenContextCanceled(t *testing.T) {
+	provider := &Provider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cfgChan := make(chan json.Marshaler)
+	err := provider.publishConfiguration(ctx, traefik.BuildConfiguration(inventory.Snapshot{}), cfgChan)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("publishConfiguration() error = %v, want context.Canceled", err)
+	}
+	if len(provider.lastPayload) != 0 {
+		t.Fatalf("lastPayload was updated after canceled publish")
+	}
+}
+
 func TestPublishResolvesIPsOnlyForEnabledRunningWorkloads(t *testing.T) {
 	scanner := &recordingScanner{
 		snapshot: inventory.Snapshot{
@@ -137,12 +154,27 @@ func TestProblemLogMessagesIncludesScanLabelAndConfigDiagnostics(t *testing.T) {
 	}, traefik.PrepareOptions{})
 
 	messages := problemLogMessages(snapshot, []traefik.Diagnostic{
-		{Node: "pve1", Kind: inventory.KindContainer, ID: 100, Message: "unsupported label"},
+		{Node: "pve1", Kind: inventory.KindContainer, ID: 100, Message: "unsupported label", Line: 4, Fragment: "port=eight"},
 	})
 
 	if len(messages) != 4 {
 		t.Fatalf("messages = %#v", messages)
 	}
+	if !messagesContain(messages, "labels: missing '=' in label (line 2: bad)") {
+		t.Fatalf("missing label source context: %#v", messages)
+	}
+	if !messagesContain(messages, "config: unsupported label (line 4: port=eight)") {
+		t.Fatalf("missing config source context: %#v", messages)
+	}
+}
+
+func messagesContain(messages []string, fragment string) bool {
+	for _, message := range messages {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 type stubScanner struct {

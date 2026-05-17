@@ -9,6 +9,8 @@ type Node struct {
 
 type Resource struct {
 	VMID   int    `json:"vmid"`
+	Node   string `json:"node,omitempty"`
+	Type   string `json:"type,omitempty"`
 	Name   string `json:"name,omitempty"`
 	Status string `json:"status,omitempty"`
 	Tags   string `json:"tags,omitempty"`

@@ -47,7 +47,9 @@ func BuildPrepared(snapshot PreparedSnapshot, options Options) Result {
 	builder := newConfigBuilder(options)
 
 	for _, workload := range snapshot.Workloads {
-		labels := builder.validateLabels(workload)
+		names := generatedNamesForPrepared(workload)
+		builder.reportNameDiagnostics(workload.Workload, names.Diagnostics)
+		labels := builder.validateLabels(workload, names)
 		if !labels.Enabled() {
 			continue
 		}
@@ -57,13 +59,13 @@ func BuildPrepared(snapshot PreparedSnapshot, options Options) Result {
 		hasUDP := labels.HasExplicitUDP()
 
 		if hasHTTP || (!hasTCP && !hasUDP) {
-			builder.addHTTPWorkload(workload.Workload, labels)
+			builder.addHTTPWorkload(workload.Workload, names, labels)
 		}
 		if hasTCP {
-			builder.addTCPWorkload(workload.Workload, labels)
+			builder.addTCPWorkload(workload.Workload, names, labels)
 		}
 		if hasUDP {
-			builder.addUDPWorkload(workload.Workload, labels)
+			builder.addUDPWorkload(workload.Workload, names, labels)
 		}
 	}
 

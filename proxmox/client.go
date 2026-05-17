@@ -104,6 +104,12 @@ func (c *Client) Nodes(ctx context.Context) ([]Node, error) {
 	return nodes, err
 }
 
+func (c *Client) ClusterResources(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+	err := c.get(ctx, "/cluster/resources?type=vm", &resources)
+	return resources, err
+}
+
 func (c *Client) VirtualMachines(ctx context.Context, node string) ([]Resource, error) {
 	var resources []Resource
 	err := c.get(ctx, "/nodes/"+pathEscape(node)+"/qemu", &resources)
@@ -210,6 +216,12 @@ func (c *Client) do(ctx context.Context, method, apiPath string, body any, into 
 
 func (c *Client) urlFor(apiPath string) string {
 	u := c.baseURL
+	if path, query, ok := strings.Cut(apiPath, "?"); ok {
+		u.Path = joinURLPath(c.baseURL.Path, path)
+		u.RawQuery = query
+		return u.String()
+	}
+
 	u.Path = joinURLPath(c.baseURL.Path, apiPath)
 	return u.String()
 }

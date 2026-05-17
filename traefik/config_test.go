@@ -204,6 +204,36 @@ func TestBuildConfigAppliesDefaultDomainAndShorthandLabels(t *testing.T) {
 	}
 }
 
+func TestBuildConfigNormalizesGeneratedWorkloadName(t *testing.T) {
+	result := Build(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:   101,
+				Name: "My App_01",
+				Node: "pve1",
+				IPs:  []inventory.IP{{Address: "10.0.0.20", Version: 4}},
+				Notes: labelsNote(map[string]string{
+					"traefik.enable": "true",
+				}),
+			},
+		},
+	}, Options{DefaultDomain: "example.com"})
+
+	router := result.Configuration.HTTP.Routers["my-app-01"]
+	if router == nil {
+		t.Fatalf("missing normalized router: %#v", result.Configuration.HTTP.Routers)
+	}
+	if router.Rule != "Host(`my-app-01.example.com`)" {
+		t.Fatalf("router rule = %q", router.Rule)
+	}
+	if result.Configuration.HTTP.Services["my-app-01"] == nil {
+		t.Fatalf("missing normalized service: %#v", result.Configuration.HTTP.Services)
+	}
+	if !diagnosticsContain(result.Diagnostics, `workload name "My App_01" normalized to "my-app-01"`) {
+		t.Fatalf("missing name normalization diagnostic: %#v", result.Diagnostics)
+	}
+}
+
 func TestBuildConfigAppliesNameOverrideAndHTTPSShorthand(t *testing.T) {
 	config := BuildConfiguration(inventory.Snapshot{
 		Workloads: []inventory.Workload{
@@ -240,6 +270,65 @@ func TestBuildConfigAppliesNameOverrideAndHTTPSShorthand(t *testing.T) {
 	}
 	if service.LoadBalancer.ServersTransport != "ignore-ssl@file" {
 		t.Fatalf("servers transport = %q", service.LoadBalancer.ServersTransport)
+	}
+}
+
+func TestBuildConfigNormalizesNameOverrideBeforeApplyingShorthands(t *testing.T) {
+	result := Build(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:   102,
+				Name: "firewall",
+				Node: "pve1",
+				IPs:  []inventory.IP{{Address: "10.0.0.1", Version: 4}},
+				Notes: labelsNote(map[string]string{
+					"traefik.enable": "true",
+					"traefik.name":   "OPNsense FW",
+					"traefik.port":   "8443",
+				}),
+			},
+		},
+	}, Options{DefaultDomain: "domain.net"})
+
+	router := result.Configuration.HTTP.Routers["opnsense-fw"]
+	if router == nil {
+		t.Fatalf("missing normalized override router: %#v", result.Configuration.HTTP.Routers)
+	}
+	if router.Rule != "Host(`opnsense-fw.domain.net`)" {
+		t.Fatalf("router rule = %q", router.Rule)
+	}
+	if got := result.Configuration.HTTP.Services["opnsense-fw"].LoadBalancer.Servers[0].URL; got != "http://10.0.0.1:8443" {
+		t.Fatalf("server URL = %q", got)
+	}
+	if !diagnosticsContain(result.Diagnostics, `label "traefik.name" value "OPNsense FW" normalized to "opnsense-fw"`) {
+		t.Fatalf("missing override normalization diagnostic: %#v", result.Diagnostics)
+	}
+}
+
+func TestBuildConfigRejectsUnusableNameOverride(t *testing.T) {
+	result := Build(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:   103,
+				Name: "My App",
+				Node: "pve1",
+				IPs:  []inventory.IP{{Address: "10.0.0.1", Version: 4}},
+				Notes: labelsNote(map[string]string{
+					"traefik.enable": "true",
+					"traefik.name":   "!!!",
+				}),
+			},
+		},
+	}, Options{})
+
+	if result.Configuration.HTTP.Routers["my-app"] == nil {
+		t.Fatalf("missing fallback router: %#v", result.Configuration.HTTP.Routers)
+	}
+	if result.Configuration.HTTP.Routers["!!!"] != nil {
+		t.Fatalf("unexpected invalid override router: %#v", result.Configuration.HTTP.Routers)
+	}
+	if !diagnosticsContain(result.Diagnostics, `label "traefik.name" value "!!!" cannot be used as a generated Traefik name; using "my-app"`) {
+		t.Fatalf("missing invalid override diagnostic: %#v", result.Diagnostics)
 	}
 }
 
@@ -365,6 +454,38 @@ func TestBuildConfigFullLabelsOverrideShorthandLabels(t *testing.T) {
 	service := config.HTTP.Services["app"]
 	if service == nil || service.LoadBalancer == nil {
 		t.Fatalf("missing service: %#v", config.HTTP.Services)
+	}
+	if got := service.LoadBalancer.Servers[0].URL; got != "https://10.0.0.30:8080" {
+		t.Fatalf("server URL = %q", got)
+	}
+}
+
+func TestBuildConfigLeavesExplicitObjectNamesUntouched(t *testing.T) {
+	config := BuildConfiguration(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:   106,
+				Name: "app",
+				Node: "pve1",
+				IPs:  []inventory.IP{{Address: "10.0.0.30", Version: 4}},
+				Notes: labelsNote(map[string]string{
+					"traefik.enable":                                               "true",
+					"traefik.http.routers.my_router.rule":                          "Host(`app.example.com`)",
+					"traefik.http.routers.my_router.service":                       "my_service",
+					"traefik.http.services.my_service.loadbalancer.server.port":    "8080",
+					"traefik.http.services.my_service.loadbalancer.server.scheme":  "https",
+					"traefik.http.services.my_service.loadbalancer.passhostheader": "false",
+				}),
+			},
+		},
+	})
+
+	if config.HTTP.Routers["my_router"] == nil {
+		t.Fatalf("explicit router names were changed: %#v", config.HTTP.Routers)
+	}
+	service := config.HTTP.Services["my_service"]
+	if service == nil || service.LoadBalancer == nil {
+		t.Fatalf("explicit service names were changed: %#v", config.HTTP.Services)
 	}
 	if got := service.LoadBalancer.Servers[0].URL; got != "https://10.0.0.30:8080" {
 		t.Fatalf("server URL = %q", got)
@@ -514,6 +635,28 @@ func TestBuildsUnsupportedAndInvalidLabels(t *testing.T) {
 	}
 	if !diagnosticsContain(result.Diagnostics, `label "traefik.http.services.app.loadbalancer.server.port" has invalid integer value "eight"`) {
 		t.Fatalf("missing port diagnostic: %#v", result.Diagnostics)
+	}
+}
+
+func TestBuildConfigDiagnosticsIncludeLabelSource(t *testing.T) {
+	result := Build(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:    104,
+				Name:  "app",
+				Node:  "pve1",
+				IPs:   []inventory.IP{{Address: "10.0.0.40", Version: 4}},
+				Notes: "intro\n```traefik\nenable=true\nport=eight\n```",
+			},
+		},
+	}, Options{})
+
+	diagnostic := findDiagnostic(result.Diagnostics, `label "traefik.port" has invalid integer value "eight"`)
+	if diagnostic == nil {
+		t.Fatalf("missing port diagnostic: %#v", result.Diagnostics)
+	}
+	if diagnostic.Line != 4 || diagnostic.Fragment != "port=eight" {
+		t.Fatalf("diagnostic source = %#v", diagnostic)
 	}
 }
 
@@ -966,10 +1109,14 @@ func TestBuildConfigAppliesUDPLabels(t *testing.T) {
 }
 
 func diagnosticsContain(diagnostics []Diagnostic, fragment string) bool {
-	for _, diagnostic := range diagnostics {
-		if strings.Contains(diagnostic.Message, fragment) {
-			return true
+	return findDiagnostic(diagnostics, fragment) != nil
+}
+
+func findDiagnostic(diagnostics []Diagnostic, fragment string) *Diagnostic {
+	for index := range diagnostics {
+		if strings.Contains(diagnostics[index].Message, fragment) {
+			return &diagnostics[index]
 		}
 	}
-	return false
+	return nil
 }

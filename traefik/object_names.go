@@ -16,25 +16,21 @@ type objectOwner struct {
 	Name string
 }
 
-func defaultObjectName(workload inventory.Workload, labels *labelcfg.Set) string {
+func defaultObjectName(names GeneratedNames, labels *labelcfg.Set) string {
 	if name, ok := labels.NameOverride(); ok {
 		return name
 	}
-	return workloadObjectName(workload)
-}
-
-func workloadObjectName(workload inventory.Workload) string {
-	if name := strings.TrimSpace(workload.Name); name != "" {
-		return name
-	}
-	if workload.Kind != "" && workload.ID != 0 {
-		return fmt.Sprintf("%s-%d", workload.Kind, workload.ID)
+	if names.Base != "" {
+		return names.Base
 	}
 	return "workload"
 }
 
 func defaultHTTPRule(name string, options Options) string {
-	host := name
+	host := normalizeGeneratedName(name)
+	if host == "" {
+		host = "workload"
+	}
 	if domain := strings.Trim(strings.TrimSpace(options.DefaultDomain), "."); domain != "" {
 		host += "." + domain
 	}
@@ -68,7 +64,10 @@ func (b *configBuilder) claimDefaultObjectName(name string, workload inventory.W
 	}
 
 	for index := 2; ; index++ {
-		candidate := fmt.Sprintf("%s-%d-%d", name, workload.ID, index)
+		candidate := generatedNameWithSuffix(name, strconv.Itoa(index))
+		if workload.ID != 0 {
+			candidate = generatedNameWithSuffix(name, strconv.Itoa(workload.ID), strconv.Itoa(index))
+		}
 		if b.claimObjectName(candidate, workload, claimed, objectKind) {
 			b.addDiagnostic(workload, fmt.Sprintf("%s name %q already exists; using %q", objectKind, name, candidate))
 			return candidate
@@ -92,13 +91,13 @@ func (b *configBuilder) claimObjectName(name string, workload inventory.Workload
 func defaultNameCollisionCandidates(name string, workload inventory.Workload) []string {
 	candidates := make([]string, 0, 3)
 	if workload.ID != 0 {
-		candidates = append(candidates, fmt.Sprintf("%s-%d", name, workload.ID))
+		candidates = append(candidates, generatedNameWithSuffix(name, strconv.Itoa(workload.ID)))
 	}
 	if workload.Kind != "" && workload.ID != 0 {
-		candidates = append(candidates, fmt.Sprintf("%s-%s-%d", name, workload.Kind, workload.ID))
+		candidates = append(candidates, generatedNameWithSuffix(name, string(workload.Kind), strconv.Itoa(workload.ID)))
 	}
 	if workload.Node != "" && workload.ID != 0 {
-		candidates = append(candidates, fmt.Sprintf("%s-%s-%d", name, workload.Node, workload.ID))
+		candidates = append(candidates, generatedNameWithSuffix(name, workload.Node, strconv.Itoa(workload.ID)))
 	}
 	return candidates
 }

@@ -32,9 +32,10 @@ func (e *ParseError) Error() string {
 }
 
 type Diagnostic struct {
-	Key   string
-	Value string
-	Err   *ParseError
+	Key    string
+	Value  string
+	Err    *ParseError
+	Source LabelSource
 }
 
 func Enabled(labels map[string]string) bool {
@@ -51,6 +52,10 @@ func Enabled(labels map[string]string) bool {
 }
 
 func Parse(labels map[string]string, defaultName string) (*Set, []Diagnostic) {
+	return ParseWithSources(labels, defaultName, nil)
+}
+
+func ParseWithSources(labels map[string]string, defaultName string, sources map[string]LabelSource) (*Set, []Diagnostic) {
 	set := newLabelSet()
 	context := labelschema.Context{DefaultName: defaultName}
 	specs := labelschema.Rows()
@@ -67,9 +72,10 @@ func Parse(labels map[string]string, defaultName string) (*Set, []Diagnostic) {
 		assignment, err := parseAssignment(specs, segments, value, context)
 		if err != nil {
 			diagnostics = append(diagnostics, Diagnostic{
-				Key:   key,
-				Value: value,
-				Err:   err,
+				Key:    key,
+				Value:  value,
+				Err:    err,
+				Source: sources[key],
 			})
 			continue
 		}

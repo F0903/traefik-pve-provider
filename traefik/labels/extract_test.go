@@ -58,6 +58,23 @@ func TestExtractFencedReportsMalformedAndDuplicateLabels(t *testing.T) {
 	if len(result.Diagnostics) != 2 {
 		t.Fatalf("diagnostic count = %d, want 2: %#v", len(result.Diagnostics), result.Diagnostics)
 	}
+	if result.Diagnostics[0].Line != 2 || result.Diagnostics[0].Fragment != "traefik.enable" {
+		t.Fatalf("first diagnostic source = %#v", result.Diagnostics[0])
+	}
+	if source := result.Sources["traefik.enable"]; source.Line != 4 || source.Fragment != "traefik.enable=true" {
+		t.Fatalf("traefik.enable source = %#v", source)
+	}
+}
+
+func TestExtractFencedParsesOnlyFirstTraefikBlock(t *testing.T) {
+	result := Extract("```traefik\nenable=false\n```\n```traefik\nenable=true\nbad\n```")
+
+	if got := result.Labels["traefik.enable"]; got != "false" {
+		t.Fatalf("traefik.enable = %q, want false", got)
+	}
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, want empty", result.Diagnostics)
+	}
 }
 
 func TestExtractFencedAcceptsPrefixlessKeys(t *testing.T) {

@@ -139,12 +139,12 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 
 	result := traefik.BuildPrepared(prepared, p.configOptions)
 	p.logProblems(prepared, result.Diagnostics)
-	if err := p.publishConfiguration(result.Configuration, cfgChan); err != nil {
+	if err := p.publishConfiguration(ctx, result.Configuration, cfgChan); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("traefik-pve-provider: failed to publish configuration: %v", err)
 	}
 }
 
-func (p *Provider) publishConfiguration(configuration *dynamic.Configuration, cfgChan chan<- json.Marshaler) error {
+func (p *Provider) publishConfiguration(ctx context.Context, configuration *dynamic.Configuration, cfgChan chan<- json.Marshaler) error {
 	payload, err := traefik.Marshal(configuration)
 	if err != nil {
 		return fmt.Errorf("marshal configuration: %w", err)
@@ -153,7 +153,12 @@ func (p *Provider) publishConfiguration(configuration *dynamic.Configuration, cf
 		return nil
 	}
 
-	cfgChan <- json.RawMessage(payload)
+	select {
+	case cfgChan <- json.RawMessage(payload):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	p.lastPayload = append(p.lastPayload[:0], payload...)
 	return nil
 }
@@ -180,12 +185,25 @@ func problemLogMessages(snapshot traefik.PreparedSnapshot, diagnostics []traefik
 			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d stage=%s: %s", problem.Node, problem.Kind, problem.ID, problem.Stage, problem.Message))
 		}
 		for _, diagnostic := range workload.Labels.ExtractDiagnostics {
-			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d labels: %s", workload.Node, workload.Kind, workload.ID, diagnostic.Message))
+			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d labels: %s", workload.Node, workload.Kind, workload.ID, diagnosticMessage(diagnostic.Message, diagnostic.Line, diagnostic.Fragment)))
 		}
 	}
 	for _, diagnostic := range diagnostics {
-		messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d config: %s", diagnostic.Node, diagnostic.Kind, diagnostic.ID, diagnostic.Message))
+		messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d config: %s", diagnostic.Node, diagnostic.Kind, diagnostic.ID, diagnosticMessage(diagnostic.Message, diagnostic.Line, diagnostic.Fragment)))
 	}
 	sort.Strings(messages)
 	return messages
+}
+
+func diagnosticMessage(message string, line int, fragment string) string {
+	switch {
+	case line > 0 && fragment != "":
+		return fmt.Sprintf("%s (line %d: %s)", message, line, fragment)
+	case line > 0:
+		return fmt.Sprintf("%s (line %d)", message, line)
+	case fragment != "":
+		return fmt.Sprintf("%s (fragment: %s)", message, fragment)
+	default:
+		return message
+	}
 }

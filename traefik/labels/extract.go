@@ -26,11 +26,18 @@ var (
 
 type ExtractDiagnostic struct {
 	Message  string
+	Line     int
+	Fragment string
+}
+
+type LabelSource struct {
+	Line     int
 	Fragment string
 }
 
 type ExtractResult struct {
 	Labels      map[string]string
+	Sources     map[string]LabelSource
 	Diagnostics []ExtractDiagnostic
 }
 
@@ -88,16 +95,18 @@ func (e Extractor) extractFenced(input, prefix string, result *ExtractResult) bo
 	inFence := false
 	inTraefikFence := false
 	seenTraefikFence := false
-	block := make([]string, 0)
+	fenceStartLine := 0
+	block := make([]sourceLine, 0)
 
-	for _, line := range lines {
+	for index, line := range lines {
+		lineNumber := index + 1
 		trimmed := strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(trimmed, codeFenceMarker); ok {
 			info := strings.TrimSpace(after)
 			if inFence {
 				if inTraefikFence {
 					e.extractFencedBlock(block, prefix, result)
-					block = block[:0]
+					return true
 				}
 				inFence = false
 				inTraefikFence = false
@@ -108,18 +117,23 @@ func (e Extractor) extractFenced(input, prefix string, result *ExtractResult) bo
 			inTraefikFence = strings.EqualFold(info, "traefik")
 			if inTraefikFence {
 				seenTraefikFence = true
+				fenceStartLine = lineNumber
 			}
 			continue
 		}
 
 		if inTraefikFence {
-			block = append(block, line)
+			block = append(block, sourceLine{
+				Number: lineNumber,
+				Text:   line,
+			})
 		}
 	}
 
 	if inTraefikFence {
 		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  "unterminated traefik code fence",
+			Line:     fenceStartLine,
 			Fragment: codeFenceMarker + "traefik",
 		})
 		e.extractFencedBlock(block, prefix, result)
@@ -128,14 +142,19 @@ func (e Extractor) extractFenced(input, prefix string, result *ExtractResult) bo
 	return seenTraefikFence
 }
 
-func (e Extractor) extractFencedBlock(lines []string, prefix string, result *ExtractResult) {
+type sourceLine struct {
+	Number int
+	Text   string
+}
+
+func (e Extractor) extractFencedBlock(lines []sourceLine, prefix string, result *ExtractResult) {
 	for _, line := range lines {
 		e.extractFencedLine(line, prefix, result)
 	}
 }
 
-func (e Extractor) extractFencedLine(line, prefix string, result *ExtractResult) {
-	fragment := strings.TrimSpace(line)
+func (e Extractor) extractFencedLine(line sourceLine, prefix string, result *ExtractResult) {
+	fragment := strings.TrimSpace(line.Text)
 	if fragment == "" || strings.HasPrefix(fragment, "#") {
 		return
 	}
@@ -144,6 +163,7 @@ func (e Extractor) extractFencedLine(line, prefix string, result *ExtractResult)
 	if !ok {
 		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  "missing '=' in label",
+			Line:     line.Number,
 			Fragment: fragment,
 		})
 		return
@@ -151,16 +171,16 @@ func (e Extractor) extractFencedLine(line, prefix string, result *ExtractResult)
 
 	key = normalizeFencedKey(key, prefix)
 	value = normalizeValue(value)
-	e.storeLabel(key, value, fragment, prefix, result)
+	e.storeLabel(key, value, fragment, line.Number, prefix, result)
 }
 
 func (e Extractor) extractLoose(input, prefix string, result *ExtractResult) {
-	for line := range strings.SplitSeq(normalizeLineEndings(input), "\n") {
-		e.extractLooseLine(line, prefix, result)
+	for index, line := range strings.Split(normalizeLineEndings(input), "\n") {
+		e.extractLooseLine(line, index+1, prefix, result)
 	}
 }
 
-func (e Extractor) extractLooseLine(line, prefix string, result *ExtractResult) {
+func (e Extractor) extractLooseLine(line string, lineNumber int, prefix string, result *ExtractResult) {
 	starts := labelStarts(line, prefix)
 	for i, start := range starts {
 		end := len(line)
@@ -177,6 +197,7 @@ func (e Extractor) extractLooseLine(line, prefix string, result *ExtractResult) 
 		if !ok {
 			result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 				Message:  "missing '=' in label",
+				Line:     lineNumber,
 				Fragment: fragment,
 			})
 			continue
@@ -188,14 +209,15 @@ func (e Extractor) extractLooseLine(line, prefix string, result *ExtractResult) 
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		e.storeLabel(key, value, fragment, prefix, result)
+		e.storeLabel(key, value, fragment, lineNumber, prefix, result)
 	}
 }
 
-func (e Extractor) storeLabel(key, value, fragment, prefix string, result *ExtractResult) {
+func (e Extractor) storeLabel(key, value, fragment string, lineNumber int, prefix string, result *ExtractResult) {
 	if !validLabelKey(key, prefix) {
 		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  fmt.Sprintf("invalid label key %q", key),
+			Line:     lineNumber,
 			Fragment: fragment,
 		})
 		return
@@ -204,10 +226,15 @@ func (e Extractor) storeLabel(key, value, fragment, prefix string, result *Extra
 	if _, exists := result.Labels[key]; exists {
 		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  fmt.Sprintf("duplicate label %q overwritten", key),
+			Line:     lineNumber,
 			Fragment: fragment,
 		})
 	}
 	result.Labels[key] = value
+	result.Sources[key] = LabelSource{
+		Line:     lineNumber,
+		Fragment: fragment,
+	}
 }
 
 func (e Extractor) effectivePrefix() string {
@@ -226,7 +253,10 @@ func (e Extractor) effectiveMode() ExtractMode {
 }
 
 func newExtractResult() ExtractResult {
-	return ExtractResult{Labels: make(map[string]string)}
+	return ExtractResult{
+		Labels:  make(map[string]string),
+		Sources: make(map[string]LabelSource),
+	}
 }
 
 func normalizeLineEndings(s string) string {

@@ -2,11 +2,41 @@ package scanner
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/F0903/traefik-pve-provider/proxmox"
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
 )
+
+func (s *Scanner) scanClusterResources(ctx context.Context) (inventory.Snapshot, bool) {
+	resources, err := s.api.ClusterResources(ctx)
+	if err != nil {
+		return inventory.Snapshot{}, false
+	}
+	if !clusterResourcesUsable(resources) {
+		return inventory.Snapshot{}, false
+	}
+
+	resources = s.filteredClusterResources(resources)
+	slices.SortFunc(resources, compareClusterResources)
+
+	snapshot := inventory.Snapshot{
+		Workloads: s.scanWorkloads(len(resources), func(index int) inventory.Workload {
+			resource := resources[index]
+			switch kind, _ := resourceKind(resource); kind {
+			case inventory.KindVM:
+				return s.scanVM(ctx, resource.Node, resource)
+			case inventory.KindContainer:
+				return s.scanContainer(ctx, resource.Node, resource)
+			default:
+				return inventory.Workload{}
+			}
+		}),
+	}
+	return snapshot, true
+}
 
 func (s *Scanner) scanNode(ctx context.Context, node string, snapshot *inventory.Snapshot) {
 	vms, err := s.api.VirtualMachines(ctx, node)
@@ -39,18 +69,37 @@ func (s *Scanner) scanContainers(ctx context.Context, node string, resources []p
 	})
 }
 
+func (s *Scanner) filteredClusterResources(resources []proxmox.Resource) []proxmox.Resource {
+	filtered := make([]proxmox.Resource, 0, len(resources))
+	for _, resource := range resources {
+		if _, ok := resourceKind(resource); !ok {
+			continue
+		}
+		if !s.includedNode(resource.Node) {
+			continue
+		}
+		if s.includeResource(resource) {
+			filtered = append(filtered, resource)
+		}
+	}
+	return filtered
+}
+
 func (s *Scanner) filteredResources(resources []proxmox.Resource) []proxmox.Resource {
 	filtered := make([]proxmox.Resource, 0, len(resources))
 	for _, resource := range resources {
-		if s.options.SkipStopped && resource.Status != "running" {
-			continue
+		if s.includeResource(resource) {
+			filtered = append(filtered, resource)
 		}
-		if !s.matchesRequiredTags(splitTags(resource.Tags)) {
-			continue
-		}
-		filtered = append(filtered, resource)
 	}
 	return filtered
+}
+
+func (s *Scanner) includeResource(resource proxmox.Resource) bool {
+	if s.options.SkipStopped && resource.Status != "running" {
+		return false
+	}
+	return s.matchesRequiredTags(splitTags(resource.Tags))
 }
 
 func (s *Scanner) scanWorkloads(count int, scan func(index int) inventory.Workload) []inventory.Workload {
@@ -127,6 +176,55 @@ func baseWorkload(kind inventory.Kind, node string, resource proxmox.Resource) i
 		Name:   resource.Name,
 		Status: resource.Status,
 		Tags:   splitTags(resource.Tags),
+	}
+}
+
+func resourceKind(resource proxmox.Resource) (inventory.Kind, bool) {
+	switch resource.Type {
+	case "qemu":
+		return inventory.KindVM, true
+	case "lxc":
+		return inventory.KindContainer, true
+	default:
+		return "", false
+	}
+}
+
+func clusterResourcesUsable(resources []proxmox.Resource) bool {
+	for _, resource := range resources {
+		if _, ok := resourceKind(resource); !ok {
+			return false
+		}
+		if strings.TrimSpace(resource.Node) == "" || resource.VMID == 0 || strings.TrimSpace(resource.Name) == "" || strings.TrimSpace(resource.Status) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func compareClusterResources(a, b proxmox.Resource) int {
+	if a.Node != b.Node {
+		if a.Node < b.Node {
+			return -1
+		}
+		return 1
+	}
+
+	if rank := resourceKindRank(a) - resourceKindRank(b); rank != 0 {
+		return rank
+	}
+
+	return a.VMID - b.VMID
+}
+
+func resourceKindRank(resource proxmox.Resource) int {
+	switch resource.Type {
+	case "qemu":
+		return 0
+	case "lxc":
+		return 1
+	default:
+		return 2
 	}
 }
 

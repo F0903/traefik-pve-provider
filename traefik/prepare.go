@@ -16,11 +16,13 @@ type PreparedSnapshot struct {
 
 type PreparedWorkload struct {
 	inventory.Workload
+	Names  GeneratedNames
 	Labels LabelState
 }
 
 type LabelState struct {
 	Raw                map[string]string
+	Sources            map[string]labelcfg.LabelSource
 	Parsed             *labelcfg.Set
 	ExtractDiagnostics []labelcfg.ExtractDiagnostic
 	ParseDiagnostics   []labelcfg.Diagnostic
@@ -42,11 +44,16 @@ func Prepare(snapshot inventory.Snapshot, options PrepareOptions) PreparedSnapsh
 
 func prepareWorkload(workload inventory.Workload, extractor labelcfg.Extractor) PreparedWorkload {
 	extracted := extractor.Extract(workload.Notes)
-	parsed, diagnostics := labelcfg.Parse(extracted.Labels, workloadObjectName(workload))
+	names := generatedNamesForWorkload(workload)
+	labels, nameDiagnostics := labelsForGeneratedNames(extracted.Labels, names.Base)
+	names.Diagnostics = append(names.Diagnostics, nameDiagnostics...)
+	parsed, diagnostics := labelcfg.ParseWithSources(labels, names.Base, extracted.Sources)
 	return PreparedWorkload{
 		Workload: workload,
+		Names:    names,
 		Labels: LabelState{
 			Raw:                extracted.Labels,
+			Sources:            extracted.Sources,
 			Parsed:             parsed,
 			ExtractDiagnostics: extracted.Diagnostics,
 			ParseDiagnostics:   diagnostics,

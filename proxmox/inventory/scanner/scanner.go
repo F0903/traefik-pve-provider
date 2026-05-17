@@ -12,6 +12,7 @@ const defaultMaxConcurrency = 4
 
 type ProxmoxAPI interface {
 	Nodes(ctx context.Context) ([]proxmox.Node, error)
+	ClusterResources(ctx context.Context) ([]proxmox.Resource, error)
 	VirtualMachines(ctx context.Context, node string) ([]proxmox.Resource, error)
 	Containers(ctx context.Context, node string) ([]proxmox.Resource, error)
 	VMConfig(ctx context.Context, node string, vmid int) (proxmox.GuestConfig, error)
@@ -49,6 +50,13 @@ func New(api ProxmoxAPI, options Options) *Scanner {
 }
 
 func (s *Scanner) Scan(ctx context.Context) (inventory.Snapshot, error) {
+	if snapshot, ok := s.scanClusterResources(ctx); ok {
+		return snapshot, nil
+	}
+	return s.scanNodes(ctx)
+}
+
+func (s *Scanner) scanNodes(ctx context.Context) (inventory.Snapshot, error) {
 	if len(s.includedNodeNames) > 0 {
 		snapshot := inventory.Snapshot{}
 		for _, node := range s.includedNodeNames {

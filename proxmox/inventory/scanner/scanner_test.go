@@ -18,6 +18,9 @@ var fakeAPICallsMu sync.Mutex
 type fakeAPI struct {
 	calls                 map[string]int
 	configHook            func(int)
+	clusterErr            error
+	clusterResources      []proxmox.Resource
+	clusterSupported      bool
 	nodesErr              error
 	nodes                 []proxmox.Node
 	vms                   map[string][]proxmox.Resource
@@ -37,6 +40,17 @@ func (f fakeAPI) Nodes(ctx context.Context) ([]proxmox.Node, error) {
 		return nil, f.nodesErr
 	}
 	return f.nodes, nil
+}
+
+func (f fakeAPI) ClusterResources(ctx context.Context) ([]proxmox.Resource, error) {
+	f.recordCall("cluster-resources")
+	if f.clusterErr != nil {
+		return nil, f.clusterErr
+	}
+	if !f.clusterSupported {
+		return nil, errors.New("cluster resources not supported")
+	}
+	return f.clusterResources, nil
 }
 
 func (f fakeAPI) VirtualMachines(ctx context.Context, node string) ([]proxmox.Resource, error) {
@@ -92,6 +106,113 @@ func (f fakeAPI) recordCall(key string) {
 		fakeAPICallsMu.Lock()
 		defer fakeAPICallsMu.Unlock()
 		f.calls[key]++
+	}
+}
+
+func TestScannerUsesClusterResourcesWhenAvailable(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls:            calls,
+		clusterSupported: true,
+		nodesErr:         errors.New("nodes should not be listed"),
+		clusterResources: []proxmox.Resource{
+			{Type: "lxc", Node: "pve-1", VMID: 200, Name: "app-ct", Status: "running", Tags: "traefik"},
+			{Type: "qemu", Node: "pve-1", VMID: 100, Name: "app-vm", Status: "running", Tags: "traefik"},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=true\n```"},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{
+			200: {Description: "```traefik\nenable=true\n```"},
+		},
+		configErr: map[int]error{},
+	}
+
+	scanner := New(api, Options{RequiredTags: []string{"traefik"}})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if calls["cluster-resources"] != 1 {
+		t.Fatalf("cluster resources calls = %d, want 1", calls["cluster-resources"])
+	}
+	if calls["nodes"] != 0 || calls["vms:pve-1"] != 0 || calls["containers:pve-1"] != 0 {
+		t.Fatalf("unexpected fallback calls: %#v", calls)
+	}
+	if len(snapshot.Workloads) != 2 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+	if snapshot.Workloads[0].Kind != inventory.KindVM || snapshot.Workloads[0].ID != 100 {
+		t.Fatalf("first workload = %#v, want VM 100", snapshot.Workloads[0])
+	}
+	if snapshot.Workloads[1].Kind != inventory.KindContainer || snapshot.Workloads[1].ID != 200 {
+		t.Fatalf("second workload = %#v, want container 200", snapshot.Workloads[1])
+	}
+}
+
+func TestScannerFallsBackWhenClusterResourcesUnavailable(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls:      calls,
+		clusterErr: errors.New("cluster resources unavailable"),
+		nodes:      []proxmox.Node{{Name: "pve-1", Status: "online"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "app-vm", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=true\n```"},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		configErr:        map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if calls["cluster-resources"] != 1 || calls["nodes"] != 1 || calls["vms:pve-1"] != 1 {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].ID != 100 {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerFallsBackWhenClusterResourcesAreUnusable(t *testing.T) {
+	calls := make(map[string]int)
+	api := fakeAPI{
+		calls:            calls,
+		clusterSupported: true,
+		clusterResources: []proxmox.Resource{
+			{Type: "qemu", VMID: 100, Name: "app-vm", Status: "running"},
+		},
+		nodes: []proxmox.Node{{Name: "pve-1", Status: "online"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "app-vm", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {Description: "```traefik\nenable=true\n```"},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		configErr:        map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	if calls["cluster-resources"] != 1 || calls["nodes"] != 1 || calls["vms:pve-1"] != 1 {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].Node != "pve-1" {
+		t.Fatalf("workloads = %#v", snapshot.Workloads)
 	}
 }
 

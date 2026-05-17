@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
@@ -43,7 +44,7 @@ func (b *configBuilder) applyHTTPServiceShorthands(workload inventory.Workload, 
 }
 
 func (b *configBuilder) ensureInsecureHTTPServersTransport(workload inventory.Workload, serviceName string) string {
-	preferred := serviceName + "-insecure"
+	preferred := generatedNameWithSuffix(serviceName, "insecure")
 	if reusableInsecureHTTPServersTransport(b.config.HTTP.ServersTransports[preferred]) {
 		return preferred
 	}
@@ -67,9 +68,9 @@ func (b *configBuilder) ensureInsecureHTTPServersTransport(workload inventory.Wo
 	}
 
 	for index := 2; ; index++ {
-		candidate := fmt.Sprintf("%s-%d", preferred, index)
+		candidate := generatedNameWithSuffix(preferred, strconv.Itoa(index))
 		if workload.ID != 0 {
-			candidate = fmt.Sprintf("%s-%d-%d", preferred, workload.ID, index)
+			candidate = generatedNameWithSuffix(preferred, strconv.Itoa(workload.ID), strconv.Itoa(index))
 		}
 		if reusableInsecureHTTPServersTransport(b.config.HTTP.ServersTransports[candidate]) {
 			return candidate
