@@ -2,8 +2,7 @@ package labels
 
 import (
 	"sort"
-
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
+	"strings"
 )
 
 type TLSDomain struct {
@@ -11,8 +10,8 @@ type TLSDomain struct {
 	SANs []string
 }
 
-func (s *Set) StringValue(tokenType lexer.TokenType) (string, bool) {
-	value, ok := s.value(tokenType)
+func (s *Set) StringValue(key string) (string, bool) {
+	value, ok := s.value(key)
 	typed, isString := value.(string)
 	if !ok || !isString || typed == "" {
 		return "", false
@@ -20,22 +19,22 @@ func (s *Set) StringValue(tokenType lexer.TokenType) (string, bool) {
 	return typed, true
 }
 
-func (s *Set) BoolValue(tokenType lexer.TokenType) (bool, bool) {
-	value, ok := s.value(tokenType)
+func (s *Set) BoolValue(key string) (bool, bool) {
+	value, ok := s.value(key)
 	typed, isBool := value.(bool)
 	return typed, ok && isBool
 }
 
-func (s *Set) value(tokenType lexer.TokenType) (any, bool) {
-	value, ok := s.values[pathKeyForTypes([]lexer.TokenType{tokenType})]
+func (s *Set) value(key string) (any, bool) {
+	value, ok := s.values[labelKey(key)]
 	if !ok {
 		return nil, false
 	}
 	return value.value, true
 }
 
-func (s *Resource) StringValue(path ...lexer.TokenType) (string, bool) {
-	value, ok := s.value(path...)
+func (s *Resource) StringValue(key string) (string, bool) {
+	value, ok := s.value(key)
 	typed, isString := value.(string)
 	if !ok || !isString || typed == "" {
 		return "", false
@@ -43,20 +42,20 @@ func (s *Resource) StringValue(path ...lexer.TokenType) (string, bool) {
 	return typed, true
 }
 
-func (s *Resource) BoolValue(path ...lexer.TokenType) (bool, bool) {
-	value, ok := s.value(path...)
+func (s *Resource) BoolValue(key string) (bool, bool) {
+	value, ok := s.value(key)
 	typed, isBool := value.(bool)
 	return typed, ok && isBool
 }
 
-func (s *Resource) IntValue(path ...lexer.TokenType) (int, bool) {
-	value, ok := s.value(path...)
+func (s *Resource) IntValue(key string) (int, bool) {
+	value, ok := s.value(key)
 	typed, isInt := value.(int)
 	return typed, ok && isInt
 }
 
-func (s *Resource) ListValue(path ...lexer.TokenType) ([]string, bool) {
-	value, ok := s.value(path...)
+func (s *Resource) ListValue(key string) ([]string, bool) {
+	value, ok := s.value(key)
 	typed, isList := value.([]string)
 	if !ok || !isList || len(typed) == 0 {
 		return nil, false
@@ -64,24 +63,24 @@ func (s *Resource) ListValue(path ...lexer.TokenType) ([]string, bool) {
 	return typed, true
 }
 
-func (s *Resource) value(path ...lexer.TokenType) (any, bool) {
+func (s *Resource) value(key string) (any, bool) {
 	if s == nil {
 		return nil, false
 	}
 
-	value, ok := s.values[pathKeyForTypes(path)]
+	value, ok := s.values[labelKey(key)]
 	if !ok {
 		return nil, false
 	}
 	return value.value, true
 }
 
-func (s *Resource) Headers(path ...lexer.TokenType) map[string]string {
+func (s *Resource) Headers(key string) map[string]string {
 	if s == nil {
 		return nil
 	}
 
-	values := s.headers[pathKeyForTypes(path)]
+	values := s.headers[labelKey(key)]
 	if len(values) == 0 {
 		return nil
 	}
@@ -93,12 +92,12 @@ func (s *Resource) Headers(path ...lexer.TokenType) map[string]string {
 	return headers
 }
 
-func (s *Resource) TLSDomains(path ...lexer.TokenType) []TLSDomain {
+func (s *Resource) TLSDomains(key string) []TLSDomain {
 	if s == nil {
 		return nil
 	}
 
-	domains := s.tlsDomains[pathKeyForTypes(path)]
+	domains := s.tlsDomains[labelKey(key)]
 	if len(domains) == 0 {
 		return nil
 	}
@@ -118,4 +117,10 @@ func (s *Resource) TLSDomains(path ...lexer.TokenType) []TLSDomain {
 		})
 	}
 	return result
+}
+
+func labelKey(raw string) labelPathKey {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	raw = strings.Trim(raw, ".")
+	return labelPathKey(raw)
 }

@@ -10,10 +10,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/proxmox"
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
 	"github.com/F0903/traefik-pve-provider/traefik"
+	"github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
 
@@ -53,7 +53,7 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 		return nil, err
 	}
 
-	metadataMode, err := metadata.ParseMode(config.MetadataMode)
+	extractMode, err := labels.ParseExtractMode(config.MetadataMode)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 		scanner: inventory.NewScanner(client, inventory.ScanOptions{
 			SkipStopped:      pveConfig.SkipStopped,
 			SkipIPResolution: pveConfig.SkipIPResolution,
-			MetadataMode:     metadataMode,
+			ExtractMode:      extractMode,
 			Nodes:            pveConfig.Nodes,
 			RequiredTags:     pveConfig.RequiredTags,
 			MaxConcurrency:   pveConfig.MaxConcurrency,
@@ -172,7 +172,7 @@ func problemLogMessages(snapshot inventory.Snapshot, diagnostics []traefik.Diagn
 			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d stage=%s: %s", problem.Node, problem.Kind, problem.ID, problem.Stage, problem.Message))
 		}
 		for _, diagnostic := range workload.LabelDiagnostics {
-			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d metadata: %s", workload.Node, workload.Kind, workload.ID, diagnostic.Message))
+			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d labels: %s", workload.Node, workload.Kind, workload.ID, diagnostic.Message))
 		}
 	}
 	for _, diagnostic := range diagnostics {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/F0903/traefik-pve-provider/metadata"
+	"github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
 const (
@@ -37,7 +37,7 @@ type PVEConfig struct {
 func CreateConfig() *Config {
 	return &Config{
 		PollInterval: defaultPollInterval.String(),
-		MetadataMode: string(metadata.ModeFenced),
+		MetadataMode: string(labels.ExtractModeFenced),
 		PVE: PVEConfig{
 			Timeout:        defaultPVETimeout.String(),
 			SkipStopped:    true,

@@ -7,10 +7,10 @@ Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-
 ## Current Package Layout
 
 - `proxmox`: Proxmox VE integration.
-  - `inventory`: scanner that combines PVE API resources, parsed notes,
+  - `inventory`: scanner that combines PVE API resources, extracted labels,
     tags, and network addresses into a normalized snapshot.
-- `metadata`: parser for Traefik labels embedded in VM/container notes.
 - `traefik`: conversion from inventory snapshots to Traefik dynamic configuration.
+  - `labels`: extraction and schema parsing for Traefik labels embedded in text.
 
 ## Traefik Installation
 
@@ -113,7 +113,7 @@ These full labels can be anywhere in the VM/container notes, as long as they sta
 The plugin currently supports these configuration options:
 
 - `pollInterval`: how often to poll for changes in VM/container notes.
-- `metadataMode`: metadata parsing mode, supported values are:
+- `metadataMode`: label extraction mode, supported values are:
   - `fenced`: parse only ```` ```traefik ```` code blocks. This is the default.
   - `loose`: parse any `traefik.*` labels found in notes.
   - `auto`: use fenced blocks when present, otherwise fall back to loose labels.

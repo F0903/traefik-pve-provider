@@ -1,7 +1,6 @@
 package inventory
 
 import (
-	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
@@ -26,7 +25,7 @@ type Workload struct {
 	Tags             []string
 	Notes            string
 	TraefikLabels    map[string]string
-	LabelDiagnostics []metadata.Diagnostic
+	LabelDiagnostics []labels.ExtractDiagnostic
 	IPs              []IP
 	Problems         []Problem
 }

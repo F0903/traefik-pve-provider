@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/proxmox"
 	"github.com/F0903/traefik-pve-provider/traefik/labels"
 )
@@ -27,7 +26,7 @@ type ProxmoxAPI interface {
 type ScanOptions struct {
 	SkipStopped      bool
 	SkipIPResolution bool
-	MetadataMode     metadata.Mode
+	ExtractMode      labels.ExtractMode
 	Nodes            []string
 	RequiredTags     []string
 	MaxConcurrency   int
@@ -35,7 +34,7 @@ type ScanOptions struct {
 
 type Scanner struct {
 	api               ProxmoxAPI
-	parser            metadata.Parser
+	extractor         labels.Extractor
 	options           ScanOptions
 	includedNodeNames []string
 	includedNodes     map[string]bool
@@ -46,7 +45,7 @@ type Scanner struct {
 func NewScanner(api ProxmoxAPI, options ScanOptions) *Scanner {
 	return &Scanner{
 		api:               api,
-		parser:            metadata.Parser{Prefix: metadata.DefaultPrefix, Mode: options.MetadataMode},
+		extractor:         labels.Extractor{Prefix: labels.DefaultPrefix, Mode: options.ExtractMode},
 		options:           options,
 		includedNodeNames: normalizedNodeNames(options.Nodes),
 		includedNodes:     normalizedSet(options.Nodes),
@@ -211,9 +210,9 @@ func (s *Scanner) applyConfig(workload *Workload, cfg proxmox.GuestConfig) {
 		workload.Tags = splitTags(cfg.Tags)
 	}
 
-	parsed := s.parser.Parse(cfg.Description)
-	workload.TraefikLabels = parsed.Labels
-	workload.LabelDiagnostics = parsed.Diagnostics
+	extracted := s.extractor.Extract(cfg.Description)
+	workload.TraefikLabels = extracted.Labels
+	workload.LabelDiagnostics = extracted.Diagnostics
 }
 
 func (s *Scanner) shouldResolveIPs(workload Workload, status string) bool {

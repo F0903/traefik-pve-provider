@@ -7,20 +7,19 @@ import (
 	"strings"
 
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
 func backendAddresses(workload inventory.Workload, source *labelcfg.Resource) []string {
-	if address, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenAddress); ok {
+	if address, ok := source.StringValue("loadbalancer.server.address"); ok {
 		return []string{address}
 	}
 
 	port := "80"
-	if parsed, ok := source.IntValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenPort); ok {
+	if parsed, ok := source.IntValue("loadbalancer.server.port"); ok {
 		port = strconv.Itoa(parsed)
 	}
-	if ip, ok := source.StringValue(lexer.TokenLoadBalancer, lexer.TokenServer, lexer.TokenIP); ok {
+	if ip, ok := source.StringValue("loadbalancer.server.ip"); ok {
 		return []string{serverAddress(ip, port)}
 	}
 

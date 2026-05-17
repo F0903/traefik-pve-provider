@@ -8,6 +8,29 @@ import (
 	"github.com/traefik/genconf/dynamic/tls"
 )
 
+type Options struct {
+	DefaultDomain string
+}
+
+type Result struct {
+	Configuration *dynamic.Configuration
+	Diagnostics   []Diagnostic
+}
+
+type configBuilder struct {
+	options     Options
+	config      *dynamic.Configuration
+	diagnostics []Diagnostic
+
+	httpRouters    map[string]objectOwner
+	httpServices   map[string]objectOwner
+	httpTransports map[string]objectOwner
+	tcpRouters     map[string]objectOwner
+	tcpServices    map[string]objectOwner
+	udpRouters     map[string]objectOwner
+	udpServices    map[string]objectOwner
+}
+
 func BuildConfiguration(snapshot inventory.Snapshot, options ...Options) *dynamic.Configuration {
 	return Build(snapshot, firstOptions(options)).Configuration
 }

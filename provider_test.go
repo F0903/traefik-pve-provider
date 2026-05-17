@@ -98,7 +98,7 @@ func TestPublishSkipsScanError(t *testing.T) {
 	}
 }
 
-func TestProblemLogMessagesIncludesScanMetadataAndConfigDiagnostics(t *testing.T) {
+func TestProblemLogMessagesIncludesScanLabelAndConfigDiagnostics(t *testing.T) {
 	messages := problemLogMessages(inventory.Snapshot{
 		Problems: []inventory.Problem{
 			{Node: "pve1", Kind: inventory.KindVM, Stage: "list", Message: "failed"},

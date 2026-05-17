@@ -2,7 +2,6 @@ package traefik
 
 import (
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
@@ -16,21 +15,21 @@ func buildTCPRouter(source *labelcfg.Resource, defaultService string) *dynamic.T
 		return router
 	}
 
-	if rule, ok := source.StringValue(lexer.TokenRule); ok {
+	if rule, ok := source.StringValue("rule"); ok {
 		router.Rule = rule
 	}
-	if service, ok := source.StringValue(lexer.TokenService); ok {
+	if service, ok := source.StringValue("service"); ok {
 		router.Service = service
 	}
-	if entrypoints, ok := source.ListValue(lexer.TokenEntryPoints); ok {
+	if entrypoints, ok := source.ListValue("entrypoints"); ok {
 		router.EntryPoints = entrypoints
-	} else if entrypoint, ok := source.StringValue(lexer.TokenEntryPoint); ok {
+	} else if entrypoint, ok := source.StringValue("entrypoint"); ok {
 		router.EntryPoints = []string{entrypoint}
 	}
-	if middlewares, ok := source.ListValue(lexer.TokenMiddlewares); ok {
+	if middlewares, ok := source.ListValue("middlewares"); ok {
 		router.Middlewares = middlewares
 	}
-	if priority, ok := source.IntValue(lexer.TokenPriority); ok {
+	if priority, ok := source.IntValue("priority"); ok {
 		router.Priority = priority
 	}
 	router.TLS = buildTCPRouterTLS(source)
@@ -42,10 +41,10 @@ func buildTCPService(workload inventory.Workload, source *labelcfg.Resource) *dy
 		Servers: buildTCPServers(workload, source),
 	}
 
-	if terminationDelay, ok := source.IntValue(lexer.TokenLoadBalancer, lexer.TokenTerminationDelay); ok {
+	if terminationDelay, ok := source.IntValue("loadbalancer.terminationdelay"); ok {
 		loadBalancer.TerminationDelay = &terminationDelay
 	}
-	if proxyProtocolVersion, ok := source.IntValue(lexer.TokenLoadBalancer, lexer.TokenProxyProtocol, lexer.TokenVersion); ok {
+	if proxyProtocolVersion, ok := source.IntValue("loadbalancer.proxyprotocol.version"); ok {
 		loadBalancer.ProxyProtocol = &dynamic.ProxyProtocol{Version: proxyProtocolVersion}
 	}
 

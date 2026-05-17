@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
@@ -23,7 +22,7 @@ func (b *configBuilder) defaultUDPServiceForRouter(workload inventory.Workload, 
 
 func (b *configBuilder) defaultServiceForRouter(workload inventory.Workload, source *labelcfg.Resource, routerName string, serviceNames []string, protocol string) string {
 	if source != nil {
-		if _, ok := source.StringValue(lexer.TokenService); ok {
+		if _, ok := source.StringValue("service"); ok {
 			return serviceNames[0]
 		}
 	}

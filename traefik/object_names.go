@@ -9,6 +9,13 @@ import (
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
+type objectOwner struct {
+	Node string
+	Kind inventory.Kind
+	ID   int
+	Name string
+}
+
 func defaultObjectName(workload inventory.Workload, labels *labelcfg.Set) string {
 	if name, ok := labels.NameOverride(); ok {
 		return name

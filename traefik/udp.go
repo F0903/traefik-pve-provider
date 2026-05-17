@@ -2,7 +2,6 @@ package traefik
 
 import (
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
@@ -13,12 +12,12 @@ func buildUDPRouter(source *labelcfg.Resource, defaultService string) *dynamic.U
 		return router
 	}
 
-	if service, ok := source.StringValue(lexer.TokenService); ok {
+	if service, ok := source.StringValue("service"); ok {
 		router.Service = service
 	}
-	if entrypoints, ok := source.ListValue(lexer.TokenEntryPoints); ok {
+	if entrypoints, ok := source.ListValue("entrypoints"); ok {
 		router.EntryPoints = entrypoints
-	} else if entrypoint, ok := source.StringValue(lexer.TokenEntryPoint); ok {
+	} else if entrypoint, ok := source.StringValue("entrypoint"); ok {
 		router.EntryPoints = []string{entrypoint}
 	}
 	return router

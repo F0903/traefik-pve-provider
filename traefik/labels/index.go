@@ -1,13 +1,5 @@
 package labels
 
-import (
-	"strconv"
-	"strings"
-
-	"github.com/F0903/traefik-pve-provider/traefik/ast"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
-)
-
 type labelPathKey string
 
 type indexedValue struct {
@@ -34,31 +26,8 @@ func putIndexedValue(values map[labelPathKey]indexedValue, key labelPathKey, val
 	values[key] = indexedValue{value: value, origin: origin}
 }
 
-func pathKeyForTypes(path []lexer.TokenType) labelPathKey {
-	var builder strings.Builder
-	for _, tokenType := range path {
-		builder.WriteByte('/')
-		builder.WriteString(strconv.Itoa(int(tokenType)))
-	}
-	return labelPathKey(builder.String())
-}
-
-func pathKeyForSegments(segments []ast.Segment) labelPathKey {
-	var builder strings.Builder
-	for _, segment := range segments {
-		builder.WriteByte('/')
-		builder.WriteString(strconv.Itoa(int(segment.Type)))
-	}
-	return labelPathKey(builder.String())
-}
-
-func (s *Resource) indexHeader(path []ast.Segment, value any, origin labelAssignmentOrigin) {
-	if len(path) < 2 {
-		return
-	}
-
-	name := path[len(path)-1]
-	if name.Type != lexer.TokenIdentifier || name.Lexeme == "" {
+func (s *Resource) indexEntry(key labelPathKey, name string, value any, origin labelAssignmentOrigin) {
+	if key == "" || name == "" {
 		return
 	}
 	headerValue, ok := value.(string)
@@ -66,41 +35,38 @@ func (s *Resource) indexHeader(path []ast.Segment, value any, origin labelAssign
 		return
 	}
 
-	key := pathKeyForSegments(path[:len(path)-1])
 	if s.headers[key] == nil {
 		s.headers[key] = make(map[string]indexedString)
 	}
-	if existing, exists := s.headers[key][name.Lexeme]; exists && existing.origin > origin {
+	if existing, exists := s.headers[key][name]; exists && existing.origin > origin {
 		return
 	}
-	s.headers[key][name.Lexeme] = indexedString{value: headerValue, origin: origin}
+	s.headers[key][name] = indexedString{value: headerValue, origin: origin}
 }
 
-func (s *Resource) indexTLSDomain(path []ast.Segment, value any, origin labelAssignmentOrigin) {
-	prefix, index, field, ok := indexedTLSDomainPath(path)
-	if !ok {
+func (s *Resource) indexTLSDomain(target labelDomainTarget, value any, origin labelAssignmentOrigin) {
+	if target.prefix == "" {
 		return
 	}
 
-	key := pathKeyForTypes(prefix)
-	if s.tlsDomains[key] == nil {
-		s.tlsDomains[key] = make(map[int]*indexedTLSDomain)
+	if s.tlsDomains[target.prefix] == nil {
+		s.tlsDomains[target.prefix] = make(map[int]*indexedTLSDomain)
 	}
-	domain := s.tlsDomains[key][index]
+	domain := s.tlsDomains[target.prefix][target.index]
 	if domain == nil {
 		domain = &indexedTLSDomain{}
-		s.tlsDomains[key][index] = domain
+		s.tlsDomains[target.prefix][target.index] = domain
 	}
 
-	switch field {
-	case lexer.TokenMain:
+	switch target.field {
+	case tlsDomainMain:
 		main, ok := value.(string)
 		if !ok || domain.mainOrigin > origin {
 			return
 		}
 		domain.main = main
 		domain.mainOrigin = origin
-	case lexer.TokenSANs:
+	case tlsDomainSANs:
 		sans, ok := value.([]string)
 		if !ok || domain.sansOrigin > origin {
 			return
@@ -108,27 +74,4 @@ func (s *Resource) indexTLSDomain(path []ast.Segment, value any, origin labelAss
 		domain.sans = sans
 		domain.sansOrigin = origin
 	}
-}
-
-func indexedTLSDomainPath(path []ast.Segment) ([]lexer.TokenType, int, lexer.TokenType, bool) {
-	for index, segment := range path {
-		if segment.Type != lexer.TokenDomains {
-			continue
-		}
-		domainIndex, ok := segment.Value.(int)
-		if !ok || len(path) != index+2 {
-			return nil, 0, lexer.TokenEOF, false
-		}
-		field := path[index+1].Type
-		if field != lexer.TokenMain && field != lexer.TokenSANs {
-			return nil, 0, lexer.TokenEOF, false
-		}
-
-		prefix := make([]lexer.TokenType, 0, index)
-		for _, segment := range path[:index] {
-			prefix = append(prefix, segment.Type)
-		}
-		return prefix, domainIndex, field, true
-	}
-	return nil, 0, lexer.TokenEOF, false
 }

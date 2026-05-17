@@ -1,7 +1,5 @@
 package labels
 
-import "github.com/F0903/traefik-pve-provider/traefik/ast"
-
 type labelAssignmentOrigin int
 
 const (
@@ -10,21 +8,23 @@ const (
 )
 
 type labelAssignment struct {
-	assignment ast.Assignment
-	origin     labelAssignmentOrigin
+	target labelTarget
+	value  any
+	origin labelAssignmentOrigin
 }
 
-func assignmentValue(value ast.Value) (any, bool) {
-	switch typed := value.(type) {
-	case ast.StringValue:
-		return typed.Value, true
-	case ast.BoolValue:
-		return typed.Value, true
-	case ast.NumberValue:
-		return typed.Value, true
-	case ast.ListValue:
-		return typed.Values, true
-	default:
-		return nil, false
-	}
+type labelTarget struct {
+	key        labelPathKey
+	protocol   labelProtocol
+	collection string
+	name       string
+	entry      string
+	domain     *labelDomainTarget
+	resource   bool
+}
+
+type labelDomainTarget struct {
+	prefix labelPathKey
+	index  int
+	field  string
 }

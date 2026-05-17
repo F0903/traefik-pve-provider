@@ -1,69 +1,70 @@
 package labels
 
 import (
-	"sort"
+	"slices"
+	"strconv"
+	"strings"
 
-	"github.com/F0903/traefik-pve-provider/traefik/ast"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
-	"github.com/F0903/traefik-pve-provider/traefik/ast/parser"
+	labelschema "github.com/F0903/traefik-pve-provider/traefik/labels/schema"
 )
+
+type ParseErrorKind int
+
+const (
+	ErrUnsupported ParseErrorKind = iota
+	ErrInvalidBoolean
+	ErrInvalidInteger
+)
+
+type ParseError struct {
+	Kind ParseErrorKind
+}
+
+func (e *ParseError) Error() string {
+	switch e.Kind {
+	case ErrInvalidBoolean:
+		return "invalid boolean"
+	case ErrInvalidInteger:
+		return "invalid integer"
+	default:
+		return "unsupported label"
+	}
+}
 
 type Diagnostic struct {
 	Key   string
 	Value string
-	Err   *parser.ParseError
+	Err   *ParseError
 }
 
 func Enabled(labels map[string]string) bool {
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
+	keys := sortedKeys(labels)
 	for _, key := range keys {
-		value := labels[key]
-		tokens := lexer.Lex(key, value)
-		if !isTraefikLabel(tokens) {
+		segments, ok := labelSegments(key)
+		if !ok || len(segments) != 1 || segments[0] != rootEnable {
 			continue
 		}
-		node, err := parser.ParseTokens(tokens, value, parser.Context{})
-		if err != nil {
-			continue
-		}
-		assignment, ok := node.(ast.Assignment)
-		if !ok {
-			continue
-		}
-		segments := assignment.Target.Segments()
-		if len(segments) != 1 || segments[0].Type != lexer.TokenEnable {
-			continue
-		}
-		enabled, ok := assignment.Value.(ast.BoolValue)
-		return ok && enabled.Value
+		enabled, ok := parseBool(labels[key])
+		return ok && enabled
 	}
 	return false
 }
 
 func Parse(labels map[string]string, defaultName string) (*Set, []Diagnostic) {
 	set := newLabelSet()
-	context := parser.Context{DefaultName: defaultName}
+	context := labelschema.Context{DefaultName: defaultName}
+	specs := labelschema.Rows()
 	diagnostics := make([]Diagnostic, 0)
 
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
+	for _, key := range sortedKeys(labels) {
 		value := labels[key]
-		tokens := lexer.Lex(key, value)
-		if !isTraefikLabel(tokens) {
+		segments, ok := labelSegments(key)
+		if !ok {
 			continue
 		}
-		set.observeTokens(tokens)
-		node, err := parser.ParseTokens(tokens, value, context)
+		set.observeSegments(segments)
+
+		assignment, err := parseAssignment(specs, segments, value, context)
 		if err != nil {
 			diagnostics = append(diagnostics, Diagnostic{
 				Key:   key,
@@ -72,57 +73,142 @@ func Parse(labels map[string]string, defaultName string) (*Set, []Diagnostic) {
 			})
 			continue
 		}
-		set.apply(node, labelAssignmentOriginForTokens(tokens))
+		set.applyAssignment(assignment)
 	}
 
 	set.applyNameOverride(defaultName)
 	return set, diagnostics
 }
 
-func isTraefikLabel(tokens []lexer.Token) bool {
-	return tokenTypeAt(tokens, 0) == lexer.TokenTraefik && tokenTypeAt(tokens, 1) == lexer.TokenDot
+func sortedKeys(labels map[string]string) []string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
-func labelAssignmentOriginForTokens(tokens []lexer.Token) labelAssignmentOrigin {
-	switch tokenTypeAt(tokens, 2) {
-	case lexer.TokenTCP, lexer.TokenUDP:
-		switch tokenTypeAt(tokens, 4) {
-		case lexer.TokenRouters, lexer.TokenServices:
-			return labelAssignmentOriginExplicit
-		default:
-			return labelAssignmentOriginShorthand
+func labelSegments(key string) ([]string, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	const prefix = "traefik."
+	if !strings.HasPrefix(key, prefix) {
+		return nil, false
+	}
+
+	rest := strings.TrimPrefix(key, prefix)
+	if rest == "" {
+		return nil, true
+	}
+	return strings.Split(rest, "."), true
+}
+
+func parseAssignment(
+	specs []labelschema.Spec,
+	segments []string,
+	rawValue string,
+	context labelschema.Context,
+) (labelAssignment, *ParseError) {
+	for _, spec := range specs {
+		match, ok := spec.Match(segments)
+		if !ok {
+			continue
 		}
-	case lexer.TokenPort,
-		lexer.TokenScheme,
-		lexer.TokenServersTransport,
-		lexer.TokenInsecureSkipVerify,
-		lexer.TokenMiddlewares,
-		lexer.TokenEntryPoints,
-		lexer.TokenEntryPoint:
-		return labelAssignmentOriginShorthand
+
+		value, err := parseValue(rawValue, spec.Value())
+		if err != nil {
+			return labelAssignment{}, err
+		}
+		return labelAssignment{
+			target: labelTargetFromSchema(spec.Target(match, context)),
+			value:  value,
+			origin: assignmentOriginFromSchema(spec.Origin()),
+		}, nil
+	}
+	return labelAssignment{}, unsupportedLabel()
+}
+
+func parseValue(raw string, kind labelschema.ValueKind) (any, *ParseError) {
+	switch kind {
+	case labelschema.ValueBool:
+		value, ok := parseBool(raw)
+		if !ok {
+			return nil, &ParseError{Kind: ErrInvalidBoolean}
+		}
+		return value, nil
+	case labelschema.ValueInt:
+		value, ok := parseInt(raw)
+		if !ok {
+			return nil, &ParseError{Kind: ErrInvalidInteger}
+		}
+		return value, nil
+	case labelschema.ValueCSV:
+		return splitCSV(raw), nil
 	default:
+		return strings.TrimSpace(raw), nil
+	}
+}
+
+func assignmentOriginFromSchema(origin labelschema.Origin) labelAssignmentOrigin {
+	if origin == labelschema.OriginExplicit {
 		return labelAssignmentOriginExplicit
 	}
+	return labelAssignmentOriginShorthand
 }
 
-func isNamedProtocolObject(tokens []lexer.Token) bool {
-	switch tokenTypeAt(tokens, 4) {
-	case lexer.TokenRouters, lexer.TokenServices, lexer.TokenServersTransports:
-		return tokenTypeAt(tokens, 5) == lexer.TokenDot &&
-			lexer.IsNameToken(tokenAt(tokens, 6)) &&
-			tokenTypeAt(tokens, 7) == lexer.TokenDot
+func labelTargetFromSchema(target labelschema.Target) labelTarget {
+	converted := labelTarget{
+		key:        labelKey(target.Key),
+		collection: target.Collection,
+		name:       target.Name,
+		entry:      target.Entry,
+		resource:   target.Resource,
+	}
+	if target.Resource {
+		converted.protocol, _ = protocolForPath(target.Protocol)
+	}
+	if target.Domain != nil {
+		converted.domain = &labelDomainTarget{
+			prefix: labelKey(target.Domain.Prefix),
+			index:  target.Domain.Index,
+			field:  target.Domain.Field,
+		}
+	}
+	return converted
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
+}
+
+func parseBool(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1", "yes", "on":
+		return true, true
+	case "false", "0", "no", "off":
+		return false, true
 	default:
-		return false
+		return false, false
 	}
 }
 
-func tokenAt(tokens []lexer.Token, index int) lexer.Token {
-	if index < 0 || index >= len(tokens) {
-		return lexer.Token{Type: lexer.TokenEOF}
+func parseInt(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
 	}
-	return tokens[index]
+	value, err := strconv.Atoi(raw)
+	return value, err == nil
 }
 
-func tokenTypeAt(tokens []lexer.Token, index int) lexer.TokenType {
-	return tokenAt(tokens, index).Type
+func unsupportedLabel() *ParseError {
+	return &ParseError{Kind: ErrUnsupported}
 }

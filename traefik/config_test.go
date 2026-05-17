@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/F0903/traefik-pve-provider/metadata"
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
+	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
 
@@ -708,8 +708,8 @@ func TestBuildConfigUsesURLAndHostnameFallback(t *testing.T) {
 }
 
 func TestBuildConfigFromRealisticPrefixlessNotesSnapshot(t *testing.T) {
-	traefikLabels := metadata.ParseNotes("```traefik\nenable=true\nport=8080\nmiddlewares=local-only@file,compress-all@file\n```").Labels
-	opnsenseLabels := metadata.ParseNotes("```traefik\nenable=true\nname=opnsense\nscheme=https\nport=443\nserverstransport=ignore-ssl@file\n```").Labels
+	traefikLabels := labelcfg.Extract("```traefik\nenable=true\nport=8080\nmiddlewares=local-only@file,compress-all@file\n```").Labels
+	opnsenseLabels := labelcfg.Extract("```traefik\nenable=true\nname=opnsense\nscheme=https\nport=443\nserverstransport=ignore-ssl@file\n```").Labels
 
 	config := BuildConfiguration(inventory.Snapshot{
 		Workloads: []inventory.Workload{
@@ -815,7 +815,7 @@ func TestBuildConfigAppliesTCPLabels(t *testing.T) {
 }
 
 func TestBuildConfigAppliesTCPShorthandLabels(t *testing.T) {
-	labels := metadata.ParseNotes("```traefik\nenable=true\ntcp.entrypoints=postgres\ntcp.rule=HostSNI(`pg.example.com`)\ntcp.port=5432\ntcp.tls=true\ntcp.tls.passthrough=true\ntcp.proxyprotocol.version=2\ntcp.terminationdelay=100\n```").Labels
+	labels := labelcfg.Extract("```traefik\nenable=true\ntcp.entrypoints=postgres\ntcp.rule=HostSNI(`pg.example.com`)\ntcp.port=5432\ntcp.tls=true\ntcp.tls.passthrough=true\ntcp.proxyprotocol.version=2\ntcp.terminationdelay=100\n```").Labels
 
 	result := Build(inventory.Snapshot{
 		Workloads: []inventory.Workload{

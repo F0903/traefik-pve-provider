@@ -1,11 +1,6 @@
 package labels
 
-import (
-	"fmt"
-	"sort"
-
-	"github.com/F0903/traefik-pve-provider/traefik/ast/lexer"
-)
+import "sort"
 
 type labelProtocol int
 
@@ -17,7 +12,7 @@ const (
 
 type ProtocolSet struct {
 	labels   *Set
-	protocol lexer.TokenType
+	protocol labelProtocol
 
 	Routers           map[string]*Resource
 	Services          map[string]*Resource
@@ -28,26 +23,13 @@ type ProtocolSet struct {
 	explicitServersTransports bool
 }
 
-func newLabelProtocolSet(labels *Set, protocol lexer.TokenType) ProtocolSet {
+func newLabelProtocolSet(labels *Set, protocol labelProtocol) ProtocolSet {
 	return ProtocolSet{
 		labels:            labels,
 		protocol:          protocol,
 		Routers:           make(map[string]*Resource),
 		Services:          make(map[string]*Resource),
 		ServersTransports: make(map[string]*Resource),
-	}
-}
-
-func protocolForSegment(tokenType lexer.TokenType) (labelProtocol, error) {
-	switch tokenType {
-	case lexer.TokenTCP:
-		return labelProtocolTCP, nil
-	case lexer.TokenUDP:
-		return labelProtocolUDP, nil
-	case lexer.TokenHTTP:
-		return labelProtocolHTTP, nil
-	default:
-		return 0, fmt.Errorf("unsupported protocol token: %v", tokenType)
 	}
 }
 
@@ -62,17 +44,13 @@ func (s *Set) protocolSet(protocol labelProtocol) *ProtocolSet {
 	}
 }
 
-func (s *ProtocolSet) observeTokens(tokens []lexer.Token) {
-	if !isNamedProtocolObject(tokens) {
-		return
-	}
-
-	switch tokenTypeAt(tokens, 4) {
-	case lexer.TokenRouters:
+func (s *ProtocolSet) markExplicit(collection string) {
+	switch collection {
+	case collectionRouters:
 		s.explicitRouters = true
-	case lexer.TokenServices:
+	case collectionServices:
 		s.explicitServices = true
-	case lexer.TokenServersTransports:
+	case collectionServersTransports:
 		s.explicitServersTransports = true
 	}
 }
@@ -90,18 +68,18 @@ func (s ProtocolSet) ServersTransportNames() ([]string, bool) {
 }
 
 func (s *ProtocolSet) router(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.Routers, lexer.TokenRouters, name, origin)
+	return s.namedResource(s.Routers, collectionRouters, name, origin)
 }
 
 func (s *ProtocolSet) service(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.Services, lexer.TokenServices, name, origin)
+	return s.namedResource(s.Services, collectionServices, name, origin)
 }
 
 func (s *ProtocolSet) serversTransport(name string, origin labelAssignmentOrigin) *Resource {
-	return s.namedResource(s.ServersTransports, lexer.TokenServersTransports, name, origin)
+	return s.namedResource(s.ServersTransports, collectionServersTransports, name, origin)
 }
 
-func (s *ProtocolSet) namedResource(objects map[string]*Resource, collection lexer.TokenType, name string, origin labelAssignmentOrigin) *Resource {
+func (s *ProtocolSet) namedResource(objects map[string]*Resource, collection string, name string, origin labelAssignmentOrigin) *Resource {
 	resource := objects[name]
 	if resource == nil {
 		resource = newResource(s.labels, s.protocol, collection, name)

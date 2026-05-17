@@ -1,4 +1,4 @@
-package metadata
+package labels
 
 import (
 	"errors"
@@ -10,71 +10,71 @@ import (
 const DefaultPrefix = "traefik."
 const codeFenceMarker = "```"
 
-type Mode string
+type ExtractMode string
 
 const (
-	ModeFenced Mode = "fenced"
-	ModeLoose  Mode = "loose"
-	ModeAuto   Mode = "auto"
+	ExtractModeFenced ExtractMode = "fenced"
+	ExtractModeLoose  ExtractMode = "loose"
+	ExtractModeAuto   ExtractMode = "auto"
 )
 
 var (
-	ErrInvalidMode   = errors.New("invalid metadata mode")
-	labelStartRegexp = regexp.MustCompile(`(?i)(^|\s)(traefik\.)`)
-	labelKeyRegexp   = regexp.MustCompile(`(?i)^traefik\.[a-z0-9_.\-\[\]]+$`)
+	ErrInvalidMode        = errors.New("invalid extraction mode")
+	defaultLabelStartExpr = regexp.MustCompile(`(?i)(^|\s)(traefik\.)`)
+	labelKeySuffixExpr    = regexp.MustCompile(`(?i)^[a-z0-9_.\-\[\]]+$`)
 )
 
-type Diagnostic struct {
+type ExtractDiagnostic struct {
 	Message  string
 	Fragment string
 }
 
-type ParseResult struct {
+type ExtractResult struct {
 	Labels      map[string]string
-	Diagnostics []Diagnostic
+	Diagnostics []ExtractDiagnostic
 }
 
-type Parser struct {
+type Extractor struct {
 	Prefix string
-	Mode   Mode
+	Mode   ExtractMode
 }
 
-func ParseNotes(notes string) ParseResult {
-	parser := Parser{Prefix: DefaultPrefix, Mode: ModeFenced}
-	return parser.Parse(notes)
+func Extract(input string) ExtractResult {
+	extractor := Extractor{Prefix: DefaultPrefix, Mode: ExtractModeFenced}
+	return extractor.Extract(input)
 }
 
-func ParseMode(raw string) (Mode, error) {
+func ParseExtractMode(raw string) (ExtractMode, error) {
 	if raw == "" {
-		return ModeFenced, nil
+		return ExtractModeFenced, nil
 	}
 
-	switch mode := Mode(strings.ToLower(strings.TrimSpace(raw))); mode {
-	case ModeFenced, ModeLoose, ModeAuto:
+	switch mode := ExtractMode(strings.ToLower(strings.TrimSpace(raw))); mode {
+	case ExtractModeFenced, ExtractModeLoose, ExtractModeAuto:
 		return mode, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrInvalidMode, raw)
 	}
 }
 
-func (p Parser) Parse(notes string) ParseResult {
-	prefix := p.effectivePrefix()
-	mode := p.effectiveMode()
-	result := newParseResult()
+func (e Extractor) Extract(input string) ExtractResult {
+	prefix := e.effectivePrefix()
+	mode := e.effectiveMode()
+	result := newExtractResult()
 
 	switch mode {
-	case ModeFenced:
-		p.parseFenced(notes, prefix, &result)
-	case ModeLoose:
-		p.parseLoose(notes, prefix, &result)
-	case ModeAuto:
-		if p.parseFenced(notes, prefix, &result) {
+	case ExtractModeFenced:
+		e.extractFenced(input, prefix, &result)
+	case ExtractModeLoose:
+		e.extractLoose(input, prefix, &result)
+	case ExtractModeAuto:
+		if e.extractFenced(input, prefix, &result) {
 			return result
 		}
-		p.parseLoose(notes, prefix, &result)
+		e.extractLoose(input, prefix, &result)
 	default:
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
-			Message:  fmt.Sprintf("invalid metadata mode %q", mode),
+		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
+			Message:  fmt.Sprintf("invalid extraction mode %q", mode),
 			Fragment: string(mode),
 		})
 	}
@@ -82,8 +82,8 @@ func (p Parser) Parse(notes string) ParseResult {
 	return result
 }
 
-func (p Parser) parseFenced(notes, prefix string, result *ParseResult) bool {
-	lines := strings.Split(normalizeLineEndings(notes), "\n")
+func (e Extractor) extractFenced(input, prefix string, result *ExtractResult) bool {
+	lines := strings.Split(normalizeLineEndings(input), "\n")
 
 	inFence := false
 	inTraefikFence := false
@@ -96,7 +96,7 @@ func (p Parser) parseFenced(notes, prefix string, result *ParseResult) bool {
 			info := strings.TrimSpace(after)
 			if inFence {
 				if inTraefikFence {
-					p.parseFencedBlock(block, prefix, result)
+					e.extractFencedBlock(block, prefix, result)
 					block = block[:0]
 				}
 				inFence = false
@@ -118,23 +118,23 @@ func (p Parser) parseFenced(notes, prefix string, result *ParseResult) bool {
 	}
 
 	if inTraefikFence {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
+		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  "unterminated traefik code fence",
 			Fragment: codeFenceMarker + "traefik",
 		})
-		p.parseFencedBlock(block, prefix, result)
+		e.extractFencedBlock(block, prefix, result)
 	}
 
 	return seenTraefikFence
 }
 
-func (p Parser) parseFencedBlock(lines []string, prefix string, result *ParseResult) {
+func (e Extractor) extractFencedBlock(lines []string, prefix string, result *ExtractResult) {
 	for _, line := range lines {
-		p.parseFencedLine(line, prefix, result)
+		e.extractFencedLine(line, prefix, result)
 	}
 }
 
-func (p Parser) parseFencedLine(line, prefix string, result *ParseResult) {
+func (e Extractor) extractFencedLine(line, prefix string, result *ExtractResult) {
 	fragment := strings.TrimSpace(line)
 	if fragment == "" || strings.HasPrefix(fragment, "#") {
 		return
@@ -142,7 +142,7 @@ func (p Parser) parseFencedLine(line, prefix string, result *ParseResult) {
 
 	key, value, ok := strings.Cut(fragment, "=")
 	if !ok {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
+		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  "missing '=' in label",
 			Fragment: fragment,
 		})
@@ -151,16 +151,16 @@ func (p Parser) parseFencedLine(line, prefix string, result *ParseResult) {
 
 	key = normalizeFencedKey(key, prefix)
 	value = normalizeValue(value)
-	p.storeLabel(key, value, fragment, result)
+	e.storeLabel(key, value, fragment, prefix, result)
 }
 
-func (p Parser) parseLoose(notes, prefix string, result *ParseResult) {
-	for line := range strings.SplitSeq(normalizeLineEndings(notes), "\n") {
-		p.parseLooseLine(line, prefix, result)
+func (e Extractor) extractLoose(input, prefix string, result *ExtractResult) {
+	for line := range strings.SplitSeq(normalizeLineEndings(input), "\n") {
+		e.extractLooseLine(line, prefix, result)
 	}
 }
 
-func (p Parser) parseLooseLine(line, prefix string, result *ParseResult) {
+func (e Extractor) extractLooseLine(line, prefix string, result *ExtractResult) {
 	starts := labelStarts(line, prefix)
 	for i, start := range starts {
 		end := len(line)
@@ -175,7 +175,7 @@ func (p Parser) parseLooseLine(line, prefix string, result *ParseResult) {
 
 		key, value, ok := strings.Cut(fragment, "=")
 		if !ok {
-			result.Diagnostics = append(result.Diagnostics, Diagnostic{
+			result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 				Message:  "missing '=' in label",
 				Fragment: fragment,
 			})
@@ -185,16 +185,16 @@ func (p Parser) parseLooseLine(line, prefix string, result *ParseResult) {
 		key = normalizeKey(key)
 		value = normalizeValue(value)
 
-		if !strings.HasPrefix(key, strings.ToLower(prefix)) {
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		p.storeLabel(key, value, fragment, result)
+		e.storeLabel(key, value, fragment, prefix, result)
 	}
 }
 
-func (p Parser) storeLabel(key, value, fragment string, result *ParseResult) {
-	if !labelKeyRegexp.MatchString(key) {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
+func (e Extractor) storeLabel(key, value, fragment, prefix string, result *ExtractResult) {
+	if !validLabelKey(key, prefix) {
+		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  fmt.Sprintf("invalid label key %q", key),
 			Fragment: fragment,
 		})
@@ -202,7 +202,7 @@ func (p Parser) storeLabel(key, value, fragment string, result *ParseResult) {
 	}
 
 	if _, exists := result.Labels[key]; exists {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
+		result.Diagnostics = append(result.Diagnostics, ExtractDiagnostic{
 			Message:  fmt.Sprintf("duplicate label %q overwritten", key),
 			Fragment: fragment,
 		})
@@ -210,22 +210,23 @@ func (p Parser) storeLabel(key, value, fragment string, result *ParseResult) {
 	result.Labels[key] = value
 }
 
-func (p Parser) effectivePrefix() string {
-	if p.Prefix == "" {
+func (e Extractor) effectivePrefix() string {
+	prefix := normalizePrefix(e.Prefix)
+	if prefix == "" {
 		return DefaultPrefix
 	}
-	return p.Prefix
+	return prefix
 }
 
-func (p Parser) effectiveMode() Mode {
-	if p.Mode == "" {
-		return ModeFenced
+func (e Extractor) effectiveMode() ExtractMode {
+	if e.Mode == "" {
+		return ExtractModeFenced
 	}
-	return p.Mode
+	return e.Mode
 }
 
-func newParseResult() ParseResult {
-	return ParseResult{Labels: make(map[string]string)}
+func newExtractResult() ExtractResult {
+	return ExtractResult{Labels: make(map[string]string)}
 }
 
 func normalizeLineEndings(s string) string {
@@ -266,12 +267,12 @@ func normalizeValue(value string) string {
 	return value
 }
 
-func labelStarts(notes, prefix string) []int {
+func labelStarts(input, prefix string) []int {
 	if !strings.EqualFold(prefix, DefaultPrefix) {
-		return customLabelStarts(notes, prefix)
+		return customLabelStarts(input, prefix)
 	}
 
-	matches := labelStartRegexp.FindAllStringSubmatchIndex(notes, -1)
+	matches := defaultLabelStartExpr.FindAllStringSubmatchIndex(input, -1)
 	starts := make([]int, 0, len(matches))
 	for _, match := range matches {
 		starts = append(starts, match[4])
@@ -279,25 +280,34 @@ func labelStarts(notes, prefix string) []int {
 	return starts
 }
 
-func customLabelStarts(notes, prefix string) []int {
-	lowerNotes := strings.ToLower(notes)
+func customLabelStarts(input, prefix string) []int {
+	lowerInput := strings.ToLower(input)
 	lowerPrefix := strings.ToLower(prefix)
 
 	var starts []int
 	searchFrom := 0
 	for {
-		idx := strings.Index(lowerNotes[searchFrom:], lowerPrefix)
+		idx := strings.Index(lowerInput[searchFrom:], lowerPrefix)
 		if idx == -1 {
 			break
 		}
 
 		start := searchFrom + idx
-		if start == 0 || isWhitespace(notes[start-1]) {
+		if start == 0 || isWhitespace(input[start-1]) {
 			starts = append(starts, start)
 		}
 		searchFrom = start + len(prefix)
 	}
 	return starts
+}
+
+func validLabelKey(key, prefix string) bool {
+	if !strings.HasPrefix(key, prefix) {
+		return false
+	}
+
+	suffix := strings.TrimPrefix(key, prefix)
+	return suffix != "" && labelKeySuffixExpr.MatchString(suffix)
 }
 
 func isWhitespace(b byte) bool {
