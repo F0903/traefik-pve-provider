@@ -1,9 +1,5 @@
 package inventory
 
-import (
-	"github.com/F0903/traefik-pve-provider/traefik/labels"
-)
-
 type Kind string
 
 const (
@@ -17,17 +13,15 @@ type Snapshot struct {
 }
 
 type Workload struct {
-	Kind             Kind
-	Node             string
-	ID               int
-	Name             string
-	Status           string
-	Tags             []string
-	Notes            string
-	TraefikLabels    map[string]string
-	LabelDiagnostics []labels.ExtractDiagnostic
-	IPs              []IP
-	Problems         []Problem
+	Kind     Kind
+	Node     string
+	ID       int
+	Name     string
+	Status   string
+	Tags     []string
+	Notes    string
+	IPs      []IP
+	Problems []Problem
 }
 
 type IP struct {
@@ -43,14 +37,4 @@ type Problem struct {
 	ID      int
 	Stage   string
 	Message string
-}
-
-func (s Snapshot) TraefikEnabled() []Workload {
-	enabled := make([]Workload, 0)
-	for _, workload := range s.Workloads {
-		if labels.Enabled(workload.TraefikLabels) {
-			enabled = append(enabled, workload)
-		}
-	}
-	return enabled
 }

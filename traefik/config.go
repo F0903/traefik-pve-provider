@@ -35,7 +35,15 @@ func BuildConfiguration(snapshot inventory.Snapshot, options ...Options) *dynami
 	return Build(snapshot, firstOptions(options)).Configuration
 }
 
+func BuildPreparedConfiguration(snapshot PreparedSnapshot, options ...Options) *dynamic.Configuration {
+	return BuildPrepared(snapshot, firstOptions(options)).Configuration
+}
+
 func Build(snapshot inventory.Snapshot, options Options) Result {
+	return BuildPrepared(Prepare(snapshot, PrepareOptions{}), options)
+}
+
+func BuildPrepared(snapshot PreparedSnapshot, options Options) Result {
 	builder := newConfigBuilder(options)
 
 	for _, workload := range snapshot.Workloads {
@@ -49,13 +57,13 @@ func Build(snapshot inventory.Snapshot, options Options) Result {
 		hasUDP := labels.HasExplicitUDP()
 
 		if hasHTTP || (!hasTCP && !hasUDP) {
-			builder.addHTTPWorkload(workload, labels)
+			builder.addHTTPWorkload(workload.Workload, labels)
 		}
 		if hasTCP {
-			builder.addTCPWorkload(workload, labels)
+			builder.addTCPWorkload(workload.Workload, labels)
 		}
 		if hasUDP {
-			builder.addUDPWorkload(workload, labels)
+			builder.addUDPWorkload(workload.Workload, labels)
 		}
 	}
 

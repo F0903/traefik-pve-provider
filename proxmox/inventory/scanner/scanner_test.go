@@ -1,4 +1,4 @@
-package inventory
+package scanner
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/F0903/traefik-pve-provider/proxmox"
+	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
 )
 
 var fakeAPICallsMu sync.Mutex
@@ -133,7 +134,7 @@ func TestScannerBuildsWorkloadSnapshot(t *testing.T) {
 		configErr: map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{})
+	scanner := New(api, Options{})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -144,22 +145,24 @@ func TestScannerBuildsWorkloadSnapshot(t *testing.T) {
 	}
 
 	vm := snapshot.Workloads[0]
-	if vm.Kind != KindVM || vm.Node != "pve-1" || vm.ID != 100 || vm.Name != "app-vm" {
+	if vm.Kind != inventory.KindVM || vm.Node != "pve-1" || vm.ID != 100 || vm.Name != "app-vm" {
 		t.Fatalf("vm workload = %#v", vm)
 	}
-	if got := vm.TraefikLabels["traefik.http.routers.app.rule"]; got != "Host(`app.example.com`)" {
-		t.Fatalf("rule = %q", got)
+	if !strings.Contains(vm.Notes, "http.routers.app.rule=Host(`app.example.com`)") {
+		t.Fatalf("notes = %q", vm.Notes)
 	}
-	if len(vm.IPs) != 1 || vm.IPs[0].Address != "192.168.10.20" {
-		t.Fatalf("vm IPs = %#v", vm.IPs)
-	}
-	if len(vm.Tags) != 2 || vm.Tags[0] != "override" || vm.Tags[1] != "tag" {
-		t.Fatalf("vm tags = %#v", vm.Tags)
+	if len(vm.IPs) != 0 {
+		t.Fatalf("vm IPs after Scan() = %#v, want unresolved", vm.IPs)
 	}
 
-	enabled := snapshot.TraefikEnabled()
-	if len(enabled) != 1 || enabled[0].ID != 100 {
-		t.Fatalf("enabled workloads = %#v", enabled)
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	vm = snapshot.Workloads[0]
+	if len(vm.IPs) != 1 || vm.IPs[0].Address != "192.168.10.20" {
+		t.Fatalf("vm IPs after ResolveIPs() = %#v", vm.IPs)
+	}
+
+	if len(vm.Tags) != 2 || vm.Tags[0] != "override" || vm.Tags[1] != "tag" {
+		t.Fatalf("vm tags = %#v", vm.Tags)
 	}
 }
 
@@ -177,7 +180,7 @@ func TestScannerRecordsConfigProblem(t *testing.T) {
 		},
 	}
 
-	scanner := NewScanner(api, ScanOptions{SkipIPResolution: true})
+	scanner := New(api, Options{SkipIPResolution: true})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -211,7 +214,7 @@ func TestScannerCanSkipStoppedWorkloads(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{SkipStopped: true, SkipIPResolution: true})
+	scanner := New(api, Options{SkipStopped: true, SkipIPResolution: true})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -240,7 +243,7 @@ func TestScannerSkipsOfflineNodes(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{SkipIPResolution: true})
+	scanner := New(api, Options{SkipIPResolution: true})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -274,7 +277,7 @@ func TestScannerCanFilterNodesAndRequiredTags(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{
+	scanner := New(api, Options{
 		SkipIPResolution: true,
 		Nodes:            []string{"pve-1"},
 		RequiredTags:     []string{"traefik"},
@@ -307,7 +310,7 @@ func TestScannerSkipsNodeListingWhenNodesConfigured(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{
+	scanner := New(api, Options{
 		SkipIPResolution: true,
 		Nodes:            []string{"pve-1"},
 	})
@@ -356,7 +359,7 @@ func TestScannerFiltersRequiredTagsBeforeGuestCalls(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{RequiredTags: []string{"traefik"}})
+	scanner := New(api, Options{RequiredTags: []string{"traefik"}})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -365,6 +368,7 @@ func TestScannerFiltersRequiredTagsBeforeGuestCalls(t *testing.T) {
 	if len(snapshot.Workloads) != 1 || snapshot.Workloads[0].ID != 101 {
 		t.Fatalf("workloads = %#v", snapshot.Workloads)
 	}
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
 	if calls["vm-config:100"] != 0 || calls["vm-interfaces:100"] != 0 {
 		t.Fatalf("excluded vm calls: config=%d interfaces=%d", calls["vm-config:100"], calls["vm-interfaces:100"])
 	}
@@ -376,7 +380,7 @@ func TestScannerFiltersRequiredTagsBeforeGuestCalls(t *testing.T) {
 	}
 }
 
-func TestScannerSkipsInterfaceLookupForDisabledWorkloads(t *testing.T) {
+func TestScannerDoesNotResolveIPsDuringScan(t *testing.T) {
 	calls := make(map[string]int)
 	api := fakeAPI{
 		calls: calls,
@@ -396,7 +400,7 @@ func TestScannerSkipsInterfaceLookupForDisabledWorkloads(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{})
+	scanner := New(api, Options{})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -453,7 +457,7 @@ func TestScannerLimitsConcurrentGuestConfigCalls(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{SkipIPResolution: true, MaxConcurrency: 2})
+	scanner := New(api, Options{SkipIPResolution: true, MaxConcurrency: 2})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -492,7 +496,7 @@ func TestScannerUsesContainerHostnameFromConfig(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{SkipIPResolution: true})
+	scanner := New(api, Options{SkipIPResolution: true})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -521,11 +525,12 @@ func TestScannerAddsPermissionHintForForbiddenInterfaceLookup(t *testing.T) {
 		configErr:           map[int]error{},
 	}
 
-	scanner := NewScanner(api, ScanOptions{})
+	scanner := New(api, Options{})
 	snapshot, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
 
 	if len(snapshot.Workloads) != 1 || len(snapshot.Workloads[0].Problems) != 1 {
 		t.Fatalf("workloads = %#v", snapshot.Workloads)

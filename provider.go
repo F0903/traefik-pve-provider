@@ -12,23 +12,26 @@ import (
 
 	"github.com/F0903/traefik-pve-provider/proxmox"
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
+	inventoryscanner "github.com/F0903/traefik-pve-provider/proxmox/inventory/scanner"
 	"github.com/F0903/traefik-pve-provider/traefik"
 	"github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
 
 type Provider struct {
-	name          string
-	pollInterval  time.Duration
-	scanner       scanner
-	cancel        context.CancelFunc
-	lastPayload   []byte
-	configOptions traefik.Options
-	lastProblems  map[string]bool
+	name           string
+	pollInterval   time.Duration
+	scanner        scanner
+	cancel         context.CancelFunc
+	lastPayload    []byte
+	configOptions  traefik.Options
+	prepareOptions traefik.PrepareOptions
+	lastProblems   map[string]bool
 }
 
 type scanner interface {
 	Scan(ctx context.Context) (inventory.Snapshot, error)
+	ResolveIPs(ctx context.Context, workloads []*inventory.Workload)
 }
 
 func New(ctx context.Context, config *Config, name string) (*Provider, error) {
@@ -73,16 +76,18 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 	return &Provider{
 		name:         name,
 		pollInterval: pollInterval,
-		scanner: inventory.NewScanner(client, inventory.ScanOptions{
+		scanner: inventoryscanner.New(client, inventoryscanner.Options{
 			SkipStopped:      pveConfig.SkipStopped,
 			SkipIPResolution: pveConfig.SkipIPResolution,
-			ExtractMode:      extractMode,
 			Nodes:            pveConfig.Nodes,
 			RequiredTags:     pveConfig.RequiredTags,
 			MaxConcurrency:   pveConfig.MaxConcurrency,
 		}),
 		configOptions: traefik.Options{
 			DefaultDomain: config.DefaultDomain,
+		},
+		prepareOptions: traefik.PrepareOptions{
+			ExtractMode: extractMode,
 		},
 	}, nil
 }
@@ -129,8 +134,11 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 		return
 	}
 
-	result := traefik.Build(snapshot, p.configOptions)
-	p.logProblems(snapshot, result.Diagnostics)
+	prepared := traefik.Prepare(snapshot, p.prepareOptions)
+	p.scanner.ResolveIPs(ctx, prepared.EnabledRunningWorkloads())
+
+	result := traefik.BuildPrepared(prepared, p.configOptions)
+	p.logProblems(prepared, result.Diagnostics)
 	if err := p.publishConfiguration(result.Configuration, cfgChan); err != nil {
 		log.Printf("traefik-pve-provider: failed to publish configuration: %v", err)
 	}
@@ -150,7 +158,7 @@ func (p *Provider) publishConfiguration(configuration *dynamic.Configuration, cf
 	return nil
 }
 
-func (p *Provider) logProblems(snapshot inventory.Snapshot, diagnostics []traefik.Diagnostic) {
+func (p *Provider) logProblems(snapshot traefik.PreparedSnapshot, diagnostics []traefik.Diagnostic) {
 	messages := problemLogMessages(snapshot, diagnostics)
 	current := make(map[string]bool, len(messages))
 	for _, message := range messages {
@@ -162,7 +170,7 @@ func (p *Provider) logProblems(snapshot inventory.Snapshot, diagnostics []traefi
 	p.lastProblems = current
 }
 
-func problemLogMessages(snapshot inventory.Snapshot, diagnostics []traefik.Diagnostic) []string {
+func problemLogMessages(snapshot traefik.PreparedSnapshot, diagnostics []traefik.Diagnostic) []string {
 	messages := make([]string, 0)
 	for _, problem := range snapshot.Problems {
 		messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s stage=%s: %s", problem.Node, problem.Kind, problem.Stage, problem.Message))
@@ -171,7 +179,7 @@ func problemLogMessages(snapshot inventory.Snapshot, diagnostics []traefik.Diagn
 		for _, problem := range workload.Problems {
 			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d stage=%s: %s", problem.Node, problem.Kind, problem.ID, problem.Stage, problem.Message))
 		}
-		for _, diagnostic := range workload.LabelDiagnostics {
+		for _, diagnostic := range workload.Labels.ExtractDiagnostics {
 			messages = append(messages, fmt.Sprintf("traefik-pve-provider: node=%s kind=%s id=%d labels: %s", workload.Node, workload.Kind, workload.ID, diagnostic.Message))
 		}
 	}

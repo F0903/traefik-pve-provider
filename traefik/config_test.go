@@ -2,6 +2,7 @@ package traefik
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 
@@ -9,6 +10,26 @@ import (
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 	"github.com/traefik/genconf/dynamic"
 )
+
+func labelsNote(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	builder.WriteString("```traefik\n")
+	for _, key := range keys {
+		labelKey := strings.TrimPrefix(key, "traefik.")
+		builder.WriteString(labelKey)
+		builder.WriteByte('=')
+		builder.WriteString(labels[key])
+		builder.WriteByte('\n')
+	}
+	builder.WriteString("```")
+	return builder.String()
+}
 
 func TestBuildConfigurationIsJSONMarshalable(t *testing.T) {
 	payload := BuildConfiguration(inventory.Snapshot{}, Options{})
@@ -43,10 +64,10 @@ func TestBuildConfigSkipsDisabledWorkloads(t *testing.T) {
 	config := BuildConfiguration(inventory.Snapshot{
 		Workloads: []inventory.Workload{
 			{
-				ID:            100,
-				Name:          "app",
-				Node:          "pve1",
-				TraefikLabels: map[string]string{"traefik.enable": "false"},
+				ID:    100,
+				Name:  "app",
+				Node:  "pve1",
+				Notes: labelsNote(map[string]string{"traefik.enable": "false"}),
 			},
 		},
 	})
@@ -56,6 +77,43 @@ func TestBuildConfigSkipsDisabledWorkloads(t *testing.T) {
 	}
 	if len(config.HTTP.Services) != 0 {
 		t.Fatalf("services = %#v, want empty", config.HTTP.Services)
+	}
+}
+
+func TestBuildConfigReusesParsedLabels(t *testing.T) {
+	parsedLabels, parseDiagnostics := labelcfg.Parse(map[string]string{
+		"traefik.enable": "true",
+		"traefik.port":   "8080",
+	}, "app")
+
+	config := BuildPreparedConfiguration(PreparedSnapshot{
+		Workloads: []PreparedWorkload{
+			{
+				Workload: inventory.Workload{
+					ID:   100,
+					Name: "app",
+					Node: "pve1",
+					IPs:  []inventory.IP{{Address: "10.0.0.10", Version: 4}},
+				},
+				Labels: LabelState{
+					Raw:              map[string]string{"traefik.enable": "false"},
+					Parsed:           parsedLabels,
+					ParseDiagnostics: parseDiagnostics,
+				},
+			},
+		},
+	})
+
+	if router := config.HTTP.Routers["app"]; router == nil {
+		t.Fatalf("missing router from parsed labels: %#v", config.HTTP.Routers)
+	}
+
+	service := config.HTTP.Services["app"]
+	if service == nil || service.LoadBalancer == nil {
+		t.Fatalf("missing service from parsed labels: %#v", config.HTTP.Services)
+	}
+	if got := service.LoadBalancer.Servers[0].URL; got != "http://10.0.0.10:8080" {
+		t.Fatalf("server URL = %q", got)
 	}
 }
 
@@ -70,9 +128,9 @@ func TestBuildConfigCreatesDefaultHTTPRouterAndService(t *testing.T) {
 					{Address: "10.0.0.10", Version: 4},
 					{Address: "10.0.0.11", Version: 4},
 				},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
-				},
+				}),
 			},
 		},
 	})
@@ -114,11 +172,11 @@ func TestBuildConfigAppliesDefaultDomainAndShorthandLabels(t *testing.T) {
 				Name: "traefik",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.20", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":      "true",
 					"traefik.port":        "8080",
 					"traefik.middlewares": "local-only@file, compress-all@file",
-				},
+				}),
 			},
 		},
 	}, Options{DefaultDomain: "domain.net"})
@@ -154,13 +212,13 @@ func TestBuildConfigAppliesNameOverrideAndHTTPSShorthand(t *testing.T) {
 				Name: "firewall",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.1", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":           "true",
 					"traefik.name":             "opnsense",
 					"traefik.scheme":           "https",
 					"traefik.port":             "8443",
 					"traefik.serverstransport": "ignore-ssl@file",
-				},
+				}),
 			},
 		},
 	}, Options{DefaultDomain: ".domain.net."})
@@ -193,13 +251,13 @@ func TestBuildConfigCreatesInsecureServersTransportFromShorthand(t *testing.T) {
 				Name: "firewall",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.1", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":             "true",
 					"traefik.name":               "opnsense",
 					"traefik.scheme":             "https",
 					"traefik.port":               "443",
 					"traefik.insecureskipverify": "true",
-				},
+				}),
 			},
 		},
 	})
@@ -232,13 +290,13 @@ func TestBuildConfigInsecureServersTransportRespectsExplicitTransport(t *testing
 				Name: "app",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.2", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":             "true",
 					"traefik.scheme":             "https",
 					"traefik.port":               "443",
 					"traefik.serverstransport":   "ignore-ssl@file",
 					"traefik.insecureskipverify": "true",
-				},
+				}),
 			},
 		},
 	})
@@ -263,12 +321,12 @@ func TestBuildConfigSupportsServiceScopedInsecureSkipVerify(t *testing.T) {
 				Name: "app",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.3", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
 					"traefik.http.services.app.loadbalancer.server.scheme":      "https",
 					"traefik.http.services.app.loadbalancer.server.port":        "8443",
 					"traefik.http.services.app.loadbalancer.insecureskipverify": "true",
-				},
+				}),
 			},
 		},
 	})
@@ -293,13 +351,13 @@ func TestBuildConfigFullLabelsOverrideShorthandLabels(t *testing.T) {
 				Name: "app",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.30", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
 					"traefik.port":   "80",
 					"traefik.scheme": "http",
 					"traefik.http.services.app.loadbalancer.server.port":   "8080",
 					"traefik.http.services.app.loadbalancer.server.scheme": "https",
-				},
+				}),
 			},
 		},
 	})
@@ -321,7 +379,7 @@ func TestBuildConfigBindsMatchingRouterAndServiceNames(t *testing.T) {
 				Name: "media",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.40", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                          "true",
 					"traefik.http.routers.jellyfin.rule":                      "Host(`jellyfin.example.com`)",
 					"traefik.http.services.jellyfin.loadbalancer.server.port": "8096",
@@ -329,7 +387,7 @@ func TestBuildConfigBindsMatchingRouterAndServiceNames(t *testing.T) {
 					"traefik.http.services.plex.loadbalancer.server.port":     "32400",
 					"traefik.http.routers.sonarr.rule":                        "Host(`sonarr.example.com`)",
 					"traefik.http.services.sonarr.loadbalancer.server.port":   "8989",
-				},
+				}),
 			},
 		},
 	})
@@ -362,26 +420,26 @@ func TestBuildConfigMergesDuplicateExplicitHTTPServiceServers(t *testing.T) {
 				Name: "app-a",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.41", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                            "true",
 					"traefik.http.routers.app.rule":                             "Host(`app.example.com`)",
 					"traefik.http.routers.app.service":                          "app",
 					"traefik.http.services.app.loadbalancer.server.port":        "8080",
 					"traefik.http.services.app.loadbalancer.sticky.cookie.name": "session",
-				},
+				}),
 			},
 			{
 				ID:   106,
 				Name: "app-b",
 				Node: "pve2",
 				IPs:  []inventory.IP{{Address: "10.0.0.42", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                            "true",
 					"traefik.http.routers.app.rule":                             "Host(`app.example.com`)",
 					"traefik.http.routers.app.service":                          "app",
 					"traefik.http.services.app.loadbalancer.server.port":        "8080",
 					"traefik.http.services.app.loadbalancer.sticky.cookie.name": "session",
-				},
+				}),
 			},
 		},
 	}, Options{})
@@ -409,11 +467,11 @@ func TestBuildConfigSkipsDottedRouterAndServiceNames(t *testing.T) {
 				Name: "app",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.43", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                        "true",
 					"traefik.http.routers.my.app.rule":                      "Host(`app.example.com`)",
 					"traefik.http.services.my.app.loadbalancer.server.port": "8080",
-				},
+				}),
 			},
 		},
 	}, Options{})
@@ -437,13 +495,13 @@ func TestBuildsUnsupportedAndInvalidLabels(t *testing.T) {
 				Name: "app",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.40", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                       "true",
 					"traefik.http.routers.app.priority":                    "high",
 					"traefik.http.routers.app.unsupported":                 "value",
 					"traefik.http.services.app.loadbalancer.server.port":   "eight",
 					"traefik.http.services.app.loadbalancer.server.scheme": "http",
-				},
+				}),
 			},
 		},
 	}, Options{})
@@ -463,19 +521,18 @@ func TestBuildConfigAvoidsDefaultNameCollisions(t *testing.T) {
 	result := Build(inventory.Snapshot{
 		Workloads: []inventory.Workload{
 			{
-				ID:               100,
-				Name:             "app",
-				Node:             "pve1",
-				IPs:              []inventory.IP{{Address: "10.0.0.10", Version: 4}},
-				TraefikLabels:    map[string]string{"traefik.enable": "true", "traefik.port": "8080"},
-				LabelDiagnostics: nil,
+				ID:    100,
+				Name:  "app",
+				Node:  "pve1",
+				IPs:   []inventory.IP{{Address: "10.0.0.10", Version: 4}},
+				Notes: labelsNote(map[string]string{"traefik.enable": "true", "traefik.port": "8080"}),
 			},
 			{
-				ID:            101,
-				Name:          "app",
-				Node:          "pve2",
-				IPs:           []inventory.IP{{Address: "10.0.0.11", Version: 4}},
-				TraefikLabels: map[string]string{"traefik.enable": "true", "traefik.port": "8081"},
+				ID:    101,
+				Name:  "app",
+				Node:  "pve2",
+				IPs:   []inventory.IP{{Address: "10.0.0.11", Version: 4}},
+				Notes: labelsNote(map[string]string{"traefik.enable": "true", "traefik.port": "8081"}),
 			},
 		},
 	}, Options{DefaultDomain: "example.com"})
@@ -508,7 +565,7 @@ func TestBuildConfigAppliesExplicitHTTPLabels(t *testing.T) {
 				ID:   200,
 				Name: "traefik",
 				Node: "pve1",
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                                                "true",
 					"traefik.http.routers.dashboard.rule":                                           "Host(`traefik.site.net`)",
 					"traefik.http.routers.dashboard.entrypoints":                                    "websecure, admin",
@@ -526,7 +583,7 @@ func TestBuildConfigAppliesExplicitHTTPLabels(t *testing.T) {
 					"traefik.http.services.dashboard.loadbalancer.sticky.cookie.httponly":           "true",
 					"traefik.http.services.dashboard.loadbalancer.responseforwarding.flushinterval": "100ms",
 					"traefik.http.services.dashboard.loadbalancer.serverstransport":                 "insecure@file",
-				},
+				}),
 			},
 		},
 	})
@@ -586,7 +643,7 @@ func TestBuildConfigAppliesHealthCheckHeadersAndServersTransport(t *testing.T) {
 				Name: "secure-backend",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.1.25", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
 					"traefik.http.services.app.loadbalancer.server.port":                           "8443",
 					"traefik.http.services.app.loadbalancer.server.scheme":                         "https",
@@ -596,7 +653,7 @@ func TestBuildConfigAppliesHealthCheckHeadersAndServersTransport(t *testing.T) {
 					"traefik.http.serverstransports.ignore-ssl.insecureskipverify":                 "true",
 					"traefik.http.serverstransports.ignore-ssl.maxidleconnsperhost":                "32",
 					"traefik.http.serverstransports.ignore-ssl.forwardingtimeouts.dialtimeout":     "5s",
-				},
+				}),
 			},
 		},
 	})
@@ -638,7 +695,7 @@ func TestBuildConfigAppliesRouterTLS(t *testing.T) {
 				Name: "secure",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.0.30", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                        "true",
 					"traefik.http.routers.secure.rule":                      "Host(`secure.example.com`)",
 					"traefik.http.routers.secure.tls":                       "true",
@@ -648,7 +705,7 @@ func TestBuildConfigAppliesRouterTLS(t *testing.T) {
 					"traefik.http.routers.secure.tls.domains[0].sans":       "*.example.com,api.example.com",
 					"traefik.http.routers.secure.tls.domains[1].main":       "example.net",
 					"traefik.http.services.secure.loadbalancer.server.port": "8443",
-				},
+				}),
 			},
 		},
 	})
@@ -681,20 +738,20 @@ func TestBuildConfigUsesURLAndHostnameFallback(t *testing.T) {
 				ID:   400,
 				Name: "url-app",
 				Node: "pve1",
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
 					"traefik.http.services.url.loadbalancer.server.url": "http://upstream.local:9000",
 					"traefik.http.routers.url.rule":                     "Host(`url.example.com`)",
 					"traefik.http.routers.url.service":                  "url",
-				},
+				}),
 			},
 			{
 				ID:   401,
 				Name: "fallback-app",
 				Node: "pve2",
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable": "true",
-				},
+				}),
 			},
 		},
 	})
@@ -714,20 +771,20 @@ func TestBuildConfigFromRealisticPrefixlessNotesSnapshot(t *testing.T) {
 	config := BuildConfiguration(inventory.Snapshot{
 		Workloads: []inventory.Workload{
 			{
-				Kind:          inventory.KindContainer,
-				ID:            100,
-				Name:          "traefik",
-				Node:          "pve1",
-				IPs:           []inventory.IP{{Address: "10.10.0.10", Version: 4}},
-				TraefikLabels: traefikLabels,
+				Kind:  inventory.KindContainer,
+				ID:    100,
+				Name:  "traefik",
+				Node:  "pve1",
+				IPs:   []inventory.IP{{Address: "10.10.0.10", Version: 4}},
+				Notes: labelsNote(traefikLabels),
 			},
 			{
-				Kind:          inventory.KindVM,
-				ID:            101,
-				Name:          "firewall",
-				Node:          "pve1",
-				IPs:           []inventory.IP{{Address: "10.10.0.1", Version: 4}},
-				TraefikLabels: opnsenseLabels,
+				Kind:  inventory.KindVM,
+				ID:    101,
+				Name:  "firewall",
+				Node:  "pve1",
+				IPs:   []inventory.IP{{Address: "10.10.0.1", Version: 4}},
+				Notes: labelsNote(opnsenseLabels),
 			},
 		},
 	}, Options{DefaultDomain: "domain.net"})
@@ -760,7 +817,7 @@ func TestBuildConfigAppliesTCPLabels(t *testing.T) {
 					{Address: "10.0.2.10", Version: 4},
 					{Address: "10.0.2.11", Version: 4},
 				},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                             "true",
 					"traefik.tcp.routers.pg.rule":                                "HostSNI(`pg.example.com`)",
 					"traefik.tcp.routers.pg.entrypoints":                         "postgres",
@@ -770,7 +827,7 @@ func TestBuildConfigAppliesTCPLabels(t *testing.T) {
 					"traefik.tcp.services.pg.loadbalancer.server.port":           "5432",
 					"traefik.tcp.services.pg.loadbalancer.proxyprotocol.version": "2",
 					"traefik.tcp.services.pg.loadbalancer.terminationdelay":      "100",
-				},
+				}),
 			},
 		},
 	})
@@ -820,11 +877,11 @@ func TestBuildConfigAppliesTCPShorthandLabels(t *testing.T) {
 	result := Build(inventory.Snapshot{
 		Workloads: []inventory.Workload{
 			{
-				ID:            501,
-				Name:          "pg",
-				Node:          "pve1",
-				IPs:           []inventory.IP{{Address: "10.0.2.10", Version: 4}},
-				TraefikLabels: labels,
+				ID:    501,
+				Name:  "pg",
+				Node:  "pve1",
+				IPs:   []inventory.IP{{Address: "10.0.2.10", Version: 4}},
+				Notes: labelsNote(labels),
 			},
 		},
 	}, Options{})
@@ -874,12 +931,12 @@ func TestBuildConfigAppliesUDPLabels(t *testing.T) {
 				Name: "dns",
 				Node: "pve1",
 				IPs:  []inventory.IP{{Address: "10.0.3.10", Version: 4}},
-				TraefikLabels: map[string]string{
+				Notes: labelsNote(map[string]string{
 					"traefik.enable":                                    "true",
 					"traefik.udp.routers.dns.entrypoints":               "dns",
 					"traefik.udp.routers.dns.service":                   "dns",
 					"traefik.udp.services.dns.loadbalancer.server.port": "53",
-				},
+				}),
 			},
 		},
 	})

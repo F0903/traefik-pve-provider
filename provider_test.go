@@ -98,26 +98,49 @@ func TestPublishSkipsScanError(t *testing.T) {
 	}
 }
 
+func TestPublishResolvesIPsOnlyForEnabledRunningWorkloads(t *testing.T) {
+	scanner := &recordingScanner{
+		snapshot: inventory.Snapshot{
+			Workloads: []inventory.Workload{
+				{ID: 100, Name: "enabled", Status: "running", Notes: "```traefik\nenable=true\n```"},
+				{ID: 101, Name: "disabled", Status: "running", Notes: "```traefik\nenable=false\n```"},
+				{ID: 102, Name: "stopped", Status: "stopped", Notes: "```traefik\nenable=true\n```"},
+			},
+		},
+	}
+	provider := &Provider{scanner: scanner}
+	cfgChan := make(chan json.Marshaler, 1)
+
+	provider.publish(context.Background(), cfgChan)
+
+	if len(scanner.resolved) != 1 || scanner.resolved[0].ID != 100 {
+		t.Fatalf("resolved workloads = %#v", scanner.resolved)
+	}
+}
+
 func TestProblemLogMessagesIncludesScanLabelAndConfigDiagnostics(t *testing.T) {
-	messages := problemLogMessages(inventory.Snapshot{
+	snapshot := traefik.Prepare(inventory.Snapshot{
 		Problems: []inventory.Problem{
 			{Node: "pve1", Kind: inventory.KindVM, Stage: "list", Message: "failed"},
 		},
 		Workloads: []inventory.Workload{
 			{
-				Node: "pve1",
-				Kind: inventory.KindContainer,
-				ID:   100,
+				Node:  "pve1",
+				Kind:  inventory.KindContainer,
+				ID:    100,
+				Notes: "```traefik\nbad\n```",
 				Problems: []inventory.Problem{
 					{Node: "pve1", Kind: inventory.KindContainer, ID: 100, Stage: "interfaces", Message: "forbidden"},
 				},
 			},
 		},
-	}, []traefik.Diagnostic{
+	}, traefik.PrepareOptions{})
+
+	messages := problemLogMessages(snapshot, []traefik.Diagnostic{
 		{Node: "pve1", Kind: inventory.KindContainer, ID: 100, Message: "unsupported label"},
 	})
 
-	if len(messages) != 3 {
+	if len(messages) != 4 {
 		t.Fatalf("messages = %#v", messages)
 	}
 }
@@ -129,4 +152,19 @@ type stubScanner struct {
 
 func (s stubScanner) Scan(ctx context.Context) (inventory.Snapshot, error) {
 	return s.snapshot, s.err
+}
+
+func (s stubScanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workload) {}
+
+type recordingScanner struct {
+	snapshot inventory.Snapshot
+	resolved []*inventory.Workload
+}
+
+func (s *recordingScanner) Scan(ctx context.Context) (inventory.Snapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s *recordingScanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workload) {
+	s.resolved = append(s.resolved, workloads...)
 }
