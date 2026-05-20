@@ -1,9 +1,6 @@
 package proxmox
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "encoding/json"
 
 type Node struct {
 	Name   string `json:"node"`
@@ -20,40 +17,11 @@ type Resource struct {
 }
 
 type GuestConfig struct {
-	Name        string `json:"name,omitempty"`
-	Hostname    string `json:"hostname,omitempty"`
-	Description string `json:"description,omitempty"`
-	Tags        string `json:"tags,omitempty"`
-	IPConfigs   map[string]string
-}
-
-func (c *GuestConfig) UnmarshalJSON(data []byte) error {
-	type guestConfig GuestConfig
-
-	var decoded guestConfig
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*c = GuestConfig(decoded)
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	for key, value := range raw {
-		if !strings.HasPrefix(key, "ipconfig") {
-			continue
-		}
-		var config string
-		if err := json.Unmarshal(value, &config); err != nil || strings.TrimSpace(config) == "" {
-			continue
-		}
-		if c.IPConfigs == nil {
-			c.IPConfigs = make(map[string]string)
-		}
-		c.IPConfigs[key] = config
-	}
-	return nil
+	Name        string            `json:"name,omitempty"`
+	Hostname    string            `json:"hostname,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Tags        string            `json:"tags,omitempty"`
+	IPConfigs   map[string]string `json:"-"`
 }
 
 type GuestAgentInterfaces struct {

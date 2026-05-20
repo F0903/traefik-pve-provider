@@ -62,7 +62,9 @@ require github.com/traefik/yaegi %s
 }
 
 func yaegiHarnessMain() string {
-	const eval = `import pve "github.com/F0903/traefik-pve-provider"
+	const eval = `import "encoding/json"
+import pve "github.com/F0903/traefik-pve-provider"
+import proxmox "github.com/F0903/traefik-pve-provider/proxmox"
 import inventory "github.com/F0903/traefik-pve-provider/proxmox/inventory"
 import tconfig "github.com/F0903/traefik-pve-provider/traefik"
 import labels "github.com/F0903/traefik-pve-provider/traefik/labels"
@@ -75,6 +77,13 @@ var _ = func() bool {
 	}
 	if !parsed.Enabled() {
 		panic("labels disabled")
+	}
+	var guestConfig proxmox.GuestConfig
+	if err := json.Unmarshal([]byte("{\"name\":\"nas\",\"description\":\"notes\",\"ipconfig0\":\"ip=10.0.0.50/24\"}"), &guestConfig); err != nil {
+		panic(err)
+	}
+	if guestConfig.Name != "nas" || guestConfig.Description != "notes" {
+		panic("guest config did not decode")
 	}
 
 	fence := string([]byte{96, 96, 96})

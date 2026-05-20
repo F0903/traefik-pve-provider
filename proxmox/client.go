@@ -124,8 +124,15 @@ func (c *Client) Containers(ctx context.Context, node string) ([]Resource, error
 
 func (c *Client) VMConfig(ctx context.Context, node string, vmid int) (GuestConfig, error) {
 	var cfg GuestConfig
-	err := c.get(ctx, "/nodes/"+pathEscape(node)+"/qemu/"+strconv.Itoa(vmid)+"/config", &cfg)
-	return cfg, err
+	data, err := c.getData(ctx, "/nodes/"+pathEscape(node)+"/qemu/"+strconv.Itoa(vmid)+"/config")
+	if err != nil || len(data) == 0 {
+		return cfg, err
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("decode response data: %w", err)
+	}
+	cfg.IPConfigs = ipConfigsFromGuestConfigData(data)
+	return cfg, nil
 }
 
 func (c *Client) ContainerConfig(ctx context.Context, node string, vmid int) (GuestConfig, error) {
@@ -148,6 +155,14 @@ func (c *Client) ContainerInterfaces(ctx context.Context, node string, vmid int)
 
 func (c *Client) get(ctx context.Context, apiPath string, into any) error {
 	return c.do(ctx, http.MethodGet, apiPath, nil, into)
+}
+
+func (c *Client) getData(ctx context.Context, apiPath string) (json.RawMessage, error) {
+	var data json.RawMessage
+	if err := c.get(ctx, apiPath, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (c *Client) do(ctx context.Context, method, apiPath string, body any, into any) error {
@@ -252,4 +267,27 @@ func joinURLPath(basePath, apiPath string) string {
 
 func pathEscape(segment string) string {
 	return url.PathEscape(segment)
+}
+
+func ipConfigsFromGuestConfigData(data json.RawMessage) map[string]string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+
+	configs := make(map[string]string)
+	for key, value := range raw {
+		if !strings.HasPrefix(key, "ipconfig") {
+			continue
+		}
+		var config string
+		if err := json.Unmarshal(value, &config); err != nil || strings.TrimSpace(config) == "" {
+			continue
+		}
+		configs[key] = config
+	}
+	if len(configs) == 0 {
+		return nil
+	}
+	return configs
 }
