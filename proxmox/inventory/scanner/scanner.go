@@ -10,6 +10,14 @@ import (
 
 const defaultMaxConcurrency = 4
 
+// Needed intstead of min for Yeagi compatibility
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 type ProxmoxAPI interface {
 	Nodes(ctx context.Context) ([]proxmox.Node, error)
 	ClusterResources(ctx context.Context) ([]proxmox.Resource, error)

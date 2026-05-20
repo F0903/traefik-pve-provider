@@ -1,7 +1,5 @@
 package schema
 
-import "slices"
-
 const (
 	RootEnable = "enable"
 	RootName   = "name"
@@ -40,7 +38,10 @@ var rows = func() []Spec {
 
 // Rows returns a copy of the compiled label schema rows.
 func Rows() []Spec {
-	return slices.Clone(rows)
+	// Yaegi fails while importing slices.Clone through Traefik's plugin path.
+	clone := make([]Spec, len(rows))
+	copy(clone, rows)
+	return clone
 }
 
 func httpSchema() []Spec {

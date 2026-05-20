@@ -1,7 +1,7 @@
 package labels
 
 import (
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -91,7 +91,8 @@ func sortedKeys(labels map[string]string) []string {
 	for key := range labels {
 		keys = append(keys, key)
 	}
-	slices.Sort(keys)
+	// Yaegi does not expose slices.Sort during interpreted plugin imports.
+	sort.Strings(keys)
 	return keys
 }
 

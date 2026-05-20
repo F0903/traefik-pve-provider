@@ -2,7 +2,7 @@ package scanner
 
 import (
 	"context"
-	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -20,7 +20,10 @@ func (s *Scanner) scanClusterResources(ctx context.Context) (inventory.Snapshot,
 	}
 
 	resources = s.filteredClusterResources(resources)
-	slices.SortFunc(resources, compareClusterResources)
+	// Yaegi does not expose slices.SortFunc during interpreted plugin imports.
+	sort.Slice(resources, func(i, j int) bool {
+		return compareClusterResources(resources[i], resources[j]) < 0
+	})
 
 	snapshot := inventory.Snapshot{
 		Workloads: s.scanWorkloads(len(resources), func(index int) inventory.Workload {
@@ -107,24 +110,28 @@ func (s *Scanner) scanWorkloads(count int, scan func(index int) inventory.Worklo
 		return nil
 	}
 
+	// Use explicit loops and WaitGroup.Add/Done for Yaegi plugin compatibility.
 	workloads := make([]inventory.Workload, count)
 	if count == 1 || s.maxConcurrency <= 1 {
-		for index := range count {
+		for index := 0; index < count; index++ {
 			workloads[index] = scan(index)
 		}
 		return workloads
 	}
 
-	limit := min(s.maxConcurrency, count)
+	limit := minInt(s.maxConcurrency, count)
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, limit)
-	for index := range count {
+	for index := 0; index < count; index++ {
+		index := index
 		sem <- struct{}{}
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			defer func() { <-sem }()
 			workloads[index] = scan(index)
-		})
+		}()
 	}
 	wg.Wait()
 	return workloads

@@ -30,17 +30,19 @@ func (s *Scanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workloa
 		return
 	}
 
-	limit := min(s.maxConcurrency, len(workloads))
+	limit := minInt(s.maxConcurrency, len(workloads))
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, limit)
 	for _, workload := range workloads {
-		workload := workload
 		sem <- struct{}{}
-		wg.Go(func() {
+		// Can't use wg.Go due to Yaegi
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			defer func() { <-sem }()
 			s.resolveWorkloadIPs(ctx, workload)
-		})
+		}()
 	}
 	wg.Wait()
 }

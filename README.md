@@ -14,7 +14,7 @@ experimental:
   plugins:
     traefik-pve-provider:
       moduleName: github.com/F0903/traefik-pve-provider
-      version: v0.9.0
+      version: v0.9.1
 ```
 
 Provider configuration:
@@ -122,6 +122,30 @@ The plugin currently supports these configuration options:
   - `maxConcurrency`: maximum concurrent per-guest PVE API calls during scans.
   - `nodes`: limits which PVE nodes are scanned.
   - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
+
+## Development Notes
+
+### Traefik / Yaegi Compatibility
+
+Traefik loads provider plugins through the embedded Yaegi interpreter instead
+of compiling them with the local Go toolchain. For that reason, runtime plugin
+code must pass both normal Go tests and an interpreted import test.
+
+The current Yaegi regression test has proven these constructs incompatible in
+runtime-imported plugin code:
+
+- `slices.Clone`, `slices.Sort`, and `slices.SortFunc`
+- the `min` builtin
+- `sync.WaitGroup.Go`
+- `range` over integers
+
+Prefer simple `sort` helpers, explicit loops, explicit `WaitGroup` usage, and
+small local helper functions where needed. Other newer language or standard
+library conveniences should be checked with the Yaegi import test before use:
+
+```bash
+go test -tags yaegi ./...
+```
 
 
 ## Examples
