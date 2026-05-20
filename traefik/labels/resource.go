@@ -1,7 +1,6 @@
 package labels
 
 type Resource struct {
-	labels     *Set
 	protocol   labelProtocol
 	collection string
 	name       string
@@ -11,9 +10,8 @@ type Resource struct {
 	tlsDomains map[labelPathKey]map[int]*indexedTLSDomain
 }
 
-func newResource(labels *Set, protocol labelProtocol, collection string, name string) *Resource {
+func newResource(protocol labelProtocol, collection string, name string) *Resource {
 	return &Resource{
-		labels:     labels,
 		protocol:   protocol,
 		collection: collection,
 		name:       name,

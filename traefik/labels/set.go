@@ -17,9 +17,9 @@ func newLabelSet() *Set {
 	set := &Set{
 		values: make(map[labelPathKey]indexedValue),
 	}
-	set.HTTP = newLabelProtocolSet(set, labelProtocolHTTP)
-	set.TCP = newLabelProtocolSet(set, labelProtocolTCP)
-	set.UDP = newLabelProtocolSet(set, labelProtocolUDP)
+	set.HTTP = newLabelProtocolSet(labelProtocolHTTP)
+	set.TCP = newLabelProtocolSet(labelProtocolTCP)
+	set.UDP = newLabelProtocolSet(labelProtocolUDP)
 	return set
 }
 
@@ -121,15 +121,15 @@ func (s *Set) rebuildResourceIndexes() {
 	udpServices := s.UDP.explicitServices
 	udpTransports := s.UDP.explicitServersTransports
 
-	s.HTTP = newLabelProtocolSet(s, labelProtocolHTTP)
+	s.HTTP = newLabelProtocolSet(labelProtocolHTTP)
 	s.HTTP.explicitRouters = httpRouters
 	s.HTTP.explicitServices = httpServices
 	s.HTTP.explicitServersTransports = httpTransports
-	s.TCP = newLabelProtocolSet(s, labelProtocolTCP)
+	s.TCP = newLabelProtocolSet(labelProtocolTCP)
 	s.TCP.explicitRouters = tcpRouters
 	s.TCP.explicitServices = tcpServices
 	s.TCP.explicitServersTransports = tcpTransports
-	s.UDP = newLabelProtocolSet(s, labelProtocolUDP)
+	s.UDP = newLabelProtocolSet(labelProtocolUDP)
 	s.UDP.explicitRouters = udpRouters
 	s.UDP.explicitServices = udpServices
 	s.UDP.explicitServersTransports = udpTransports

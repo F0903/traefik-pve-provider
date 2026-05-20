@@ -11,7 +11,6 @@ const (
 )
 
 type ProtocolSet struct {
-	labels   *Set
 	protocol labelProtocol
 
 	Routers           map[string]*Resource
@@ -23,9 +22,8 @@ type ProtocolSet struct {
 	explicitServersTransports bool
 }
 
-func newLabelProtocolSet(labels *Set, protocol labelProtocol) ProtocolSet {
+func newLabelProtocolSet(protocol labelProtocol) ProtocolSet {
 	return ProtocolSet{
-		labels:            labels,
 		protocol:          protocol,
 		Routers:           make(map[string]*Resource),
 		Services:          make(map[string]*Resource),
@@ -82,7 +80,7 @@ func (s *ProtocolSet) serversTransport(name string, origin labelAssignmentOrigin
 func (s *ProtocolSet) namedResource(objects map[string]*Resource, collection string, name string, origin labelAssignmentOrigin) *Resource {
 	resource := objects[name]
 	if resource == nil {
-		resource = newResource(s.labels, s.protocol, collection, name)
+		resource = newResource(s.protocol, collection, name)
 		objects[name] = resource
 	}
 	if origin == labelAssignmentOriginExplicit {

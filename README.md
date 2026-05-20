@@ -139,10 +139,14 @@ runtime-imported plugin code:
 - the `min` builtin
 - `sync.WaitGroup.Go`
 - `range` over integers
+- unused self-referential label back-pointers such as `ProtocolSet -> *Set`
+  and `Resource -> *Set`
 
 Prefer simple `sort` helpers, explicit loops, explicit `WaitGroup` usage, and
-small local helper functions where needed. Other newer language or standard
-library conveniences should be checked with the Yaegi import test before use:
+small local helper functions where needed. Keep the label graph acyclic unless a
+back-reference is actually required and covered by the Yaegi import test. Other
+newer language or standard library conveniences should be checked with the Yaegi
+import test before use:
 
 ```bash
 go test -tags yaegi ./...

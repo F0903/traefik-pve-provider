@@ -62,7 +62,56 @@ require github.com/traefik/yaegi %s
 }
 
 func yaegiHarnessMain() string {
-	const eval = `import pve "github.com/F0903/traefik-pve-provider"; var _ = pve.CreateConfig()`
+	const eval = `import pve "github.com/F0903/traefik-pve-provider"
+import inventory "github.com/F0903/traefik-pve-provider/proxmox/inventory"
+import tconfig "github.com/F0903/traefik-pve-provider/traefik"
+import labels "github.com/F0903/traefik-pve-provider/traefik/labels"
+
+var _ = pve.CreateConfig()
+var _ = func() bool {
+	parsed, diagnostics := labels.Parse(map[string]string{"traefik.enable": "true", "traefik.port": "8080"}, "app")
+	if len(diagnostics) != 0 {
+		panic("unexpected diagnostics")
+	}
+	if !parsed.Enabled() {
+		panic("labels disabled")
+	}
+
+	fence := string([]byte{96, 96, 96})
+	prepared := tconfig.Prepare(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				Kind:   inventory.KindVM,
+				Node:   "pve1",
+				ID:     100,
+				Name:   "app",
+				Status: "running",
+				IPs:    []inventory.IP{{Address: "10.0.0.10", Version: 4}},
+				Notes:  fence + "traefik\nenable=true\nport=8080\n" + fence,
+			},
+		},
+	}, tconfig.PrepareOptions{})
+	if len(prepared.Workloads) != 1 || !prepared.Workloads[0].Labels.Enabled() {
+		panic("workload labels were not prepared")
+	}
+
+	config := tconfig.BuildPreparedConfiguration(prepared, tconfig.Options{DefaultDomain: "example.com"})
+	router := config.HTTP.Routers["app"]
+	if router == nil || router.Service != "app" {
+		panic("missing HTTP router")
+	}
+	service := config.HTTP.Services["app"]
+	if service == nil || service.LoadBalancer == nil || len(service.LoadBalancer.Servers) != 1 {
+		panic("missing HTTP service")
+	}
+	if service.LoadBalancer.Servers[0].URL != "http://10.0.0.10:8080" {
+		panic("unexpected HTTP server URL")
+	}
+	if payload, err := tconfig.Marshal(config); err != nil || len(payload) == 0 {
+		panic("configuration did not marshal")
+	}
+	return true
+}()`
 	return fmt.Sprintf(`package main
 
 import (
