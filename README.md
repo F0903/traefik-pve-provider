@@ -27,12 +27,13 @@ providers:
       metadataMode: fenced
       defaultDomain: example.com
       pve:
-        endpoint: https://pve.example.com
-        tokenID: root@pam!traefik
-        token: your-token-secret
-        timeout: 30s
-        insecureSkipVerify: false
+        endpoint: "https://pve.example.com"
+        tokenID: "your-token-id"
+        token: "your-token-secret"
+        timeout: "5s"
+        insecureSkipVerify: true
         skipStopped: true
+        skipIPResolution: true
         maxConcurrency: 4
         nodes:
           - pve-1
