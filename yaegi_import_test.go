@@ -22,6 +22,12 @@ func TestYaegiImportsPlugin(t *testing.T) {
 
 	tempDir := t.TempDir()
 	gopath := filepath.Join(tempDir, "gopath")
+	t.Cleanup(func() {
+		if err := makeWritable(filepath.Join(gopath, "pkg", "mod")); err != nil {
+			t.Logf("make module cache writable: %v", err)
+		}
+	})
+
 	pluginPath := filepath.Join(gopath, "src", "github.com", "F0903", "traefik-pve-provider")
 	if err := copyDir(repoRoot, pluginPath); err != nil {
 		t.Fatalf("copy plugin source: %v", err)
@@ -132,6 +138,21 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+func makeWritable(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o755)
+		}
+		return os.Chmod(path, 0o644)
+	})
 }
 
 func runTestCommand(t *testing.T, dir string, env []string, name string, args ...string) {
