@@ -14,7 +14,7 @@ experimental:
   plugins:
     traefik-pve-provider:
       moduleName: github.com/F0903/traefik-pve-provider
-      version: v0.9.2
+      version: v0.9.3
 ```
 
 Provider configuration:
