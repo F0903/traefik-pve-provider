@@ -23,6 +23,7 @@ func TestNewAcceptsCatalogTestDataShape(t *testing.T) {
 			InsecureSkipVerify: true,
 			SkipStopped:        true,
 			SkipIPResolution:   true,
+			IPMode:             "ipv4/6",
 			MaxConcurrency:     4,
 		},
 		MetadataMode:  "fenced",
@@ -36,6 +37,22 @@ func TestNewAcceptsCatalogTestDataShape(t *testing.T) {
 	}
 	if provider.configOptions.DefaultDomain != "example.com" {
 		t.Fatalf("default domain = %q", provider.configOptions.DefaultDomain)
+	}
+}
+
+func TestNewRejectsInvalidIPMode(t *testing.T) {
+	_, err := New(context.Background(), &Config{
+		PollInterval: "60s",
+		PVE: PVEConfig{
+			Endpoint: "https://pve.example.com",
+			TokenID:  "root@pam!traefik",
+			Token:    "secret",
+			IPMode:   "ipv5",
+		},
+	}, "traefik-pve-provider")
+
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 

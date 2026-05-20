@@ -13,7 +13,7 @@ import (
 
 func (b *configBuilder) addOrMergeHTTPService(workload inventory.Workload, labels *labelcfg.Set, serviceName string) {
 	source := labels.HTTP.Services[serviceName]
-	service := buildHTTPService(workload, source)
+	service := buildHTTPService(workload, source, b.options)
 	b.applyHTTPServiceShorthands(workload, source, serviceName, service)
 	existing := b.config.HTTP.Services[serviceName]
 	if existing == nil {

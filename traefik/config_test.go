@@ -907,6 +907,52 @@ func TestBuildConfigUsesURLAndHostnameFallback(t *testing.T) {
 	}
 }
 
+func TestBuildConfigUsesDefaultDomainForBackendHostnameFallback(t *testing.T) {
+	config := BuildConfiguration(inventory.Snapshot{
+		Workloads: []inventory.Workload{
+			{
+				ID:   402,
+				Name: "nas",
+				Node: "yggdrasil",
+				Notes: labelsNote(map[string]string{
+					"traefik.enable": "true",
+					"traefik.port":   "8080",
+				}),
+			},
+			{
+				ID:   403,
+				Name: "postgres",
+				Node: "yggdrasil",
+				Notes: labelsNote(map[string]string{
+					"traefik.enable":          "true",
+					"traefik.tcp.entrypoints": "postgres",
+					"traefik.tcp.port":        "5432",
+				}),
+			},
+			{
+				ID:   404,
+				Name: "dns",
+				Node: "yggdrasil",
+				Notes: labelsNote(map[string]string{
+					"traefik.enable":          "true",
+					"traefik.udp.entrypoints": "dns",
+					"traefik.udp.port":        "53",
+				}),
+			},
+		},
+	}, Options{DefaultDomain: "example.com"})
+
+	if got := config.HTTP.Services["nas"].LoadBalancer.Servers[0].URL; got != "http://nas.example.com:8080" {
+		t.Fatalf("HTTP fallback server = %q", got)
+	}
+	if got := config.TCP.Services["postgres"].LoadBalancer.Servers[0].Address; got != "postgres.example.com:5432" {
+		t.Fatalf("TCP fallback server = %q", got)
+	}
+	if got := config.UDP.Services["dns"].LoadBalancer.Servers[0].Address; got != "dns.example.com:53" {
+		t.Fatalf("UDP fallback server = %q", got)
+	}
+}
+
 func TestBuildConfigFromRealisticPrefixlessNotesSnapshot(t *testing.T) {
 	traefikLabels := labelcfg.Extract("```traefik\nenable=true\nport=8080\nmiddlewares=local-only@file,compress-all@file\n```").Labels
 	opnsenseLabels := labelcfg.Extract("```traefik\nenable=true\nname=opnsense\nscheme=https\nport=443\nserverstransport=ignore-ssl@file\n```").Labels

@@ -23,16 +23,16 @@ func buildUDPRouter(source *labelcfg.Resource, defaultService string) *dynamic.U
 	return router
 }
 
-func buildUDPService(workload inventory.Workload, source *labelcfg.Resource) *dynamic.UDPService {
+func buildUDPService(workload inventory.Workload, source *labelcfg.Resource, options Options) *dynamic.UDPService {
 	return &dynamic.UDPService{
 		LoadBalancer: &dynamic.UDPServersLoadBalancer{
-			Servers: buildUDPServers(workload, source),
+			Servers: buildUDPServers(workload, source, options),
 		},
 	}
 }
 
-func buildUDPServers(workload inventory.Workload, source *labelcfg.Resource) []dynamic.UDPServer {
-	addresses := backendAddresses(workload, source)
+func buildUDPServers(workload inventory.Workload, source *labelcfg.Resource, options Options) []dynamic.UDPServer {
+	addresses := backendAddresses(workload, source, options)
 	servers := make([]dynamic.UDPServer, 0, len(addresses))
 	for _, address := range addresses {
 		servers = append(servers, dynamic.UDPServer{Address: address})

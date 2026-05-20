@@ -103,6 +103,41 @@ func TestClientRequestsClusterResourcesWithTypeFilter(t *testing.T) {
 	}
 }
 
+func TestClientDecodesVMConfigIPConfigs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api2/json/nodes/pve-1/qemu/100/config" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"name":"nas","description":"notes","ipconfig0":"ip=10.0.0.50/24,gw=10.0.0.1","ipconfig1":"ip6=fd00::50/64,gw6=fd00::1"}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		Endpoint: server.URL,
+		TokenID:  "root@pam!traefik",
+		Token:    "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	config, err := client.VMConfig(context.Background(), "pve-1", 100)
+	if err != nil {
+		t.Fatalf("VMConfig() error = %v", err)
+	}
+
+	if config.Name != "nas" || config.Description != "notes" {
+		t.Fatalf("config = %#v", config)
+	}
+	if config.IPConfigs["ipconfig0"] != "ip=10.0.0.50/24,gw=10.0.0.1" {
+		t.Fatalf("ipconfig0 = %q", config.IPConfigs["ipconfig0"])
+	}
+	if config.IPConfigs["ipconfig1"] != "ip6=fd00::50/64,gw6=fd00::1" {
+		t.Fatalf("ipconfig1 = %q", config.IPConfigs["ipconfig1"])
+	}
+}
+
 func TestClientReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "permission denied", http.StatusForbidden)

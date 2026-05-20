@@ -17,6 +17,9 @@ func TestCreateConfig(t *testing.T) {
 	if !cfg.PVE.SkipStopped {
 		t.Fatal("PVE.SkipStopped = false")
 	}
+	if cfg.PVE.IPMode != "ipv4" {
+		t.Fatalf("PVE.IPMode = %q", cfg.PVE.IPMode)
+	}
 	if cfg.PVE.MaxConcurrency != 4 {
 		t.Fatalf("PVE.MaxConcurrency = %d", cfg.PVE.MaxConcurrency)
 	}

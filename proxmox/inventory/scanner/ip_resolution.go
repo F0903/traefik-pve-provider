@@ -55,14 +55,18 @@ func (s *Scanner) resolveWorkloadIPs(ctx context.Context, workload *inventory.Wo
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
 			return
 		}
-		workload.IPs = ipsFromInterfaces(interfaces.Result)
+		if ips := ipsFromInterfaces(interfaces.Result, s.ipMode); len(ips) > 0 {
+			workload.IPs = ips
+		}
 	case inventory.KindContainer:
 		interfaces, err := s.api.ContainerInterfaces(ctx, workload.Node, workload.ID)
 		if err != nil {
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
 			return
 		}
-		workload.IPs = ipsFromInterfaces(interfaces)
+		if ips := ipsFromInterfaces(interfaces, s.ipMode); len(ips) > 0 {
+			workload.IPs = ips
+		}
 	}
 }
 
@@ -94,13 +98,16 @@ func ipResolutionTargets(workloads []*inventory.Workload) []*inventory.Workload 
 	return targets
 }
 
-func ipsFromInterfaces(interfaces []proxmox.NetworkInterface) []inventory.IP {
+func ipsFromInterfaces(interfaces []proxmox.NetworkInterface, mode IPMode) []inventory.IP {
 	seen := make(map[string]bool)
 	ips := make([]inventory.IP, 0)
 
 	for _, iface := range interfaces {
+		if ignoredGuestInterface(iface.Name) {
+			continue
+		}
 		for _, ipAddress := range iface.IPAddresses {
-			ip := ipFromAddress(ipAddress.Address, ipAddress.Prefix.String(), iface.Name)
+			ip := ipFromAddress(ipAddress.Address, ipAddress.Prefix.String(), iface.Name, mode)
 			if ip == nil || seen[ip.Address] {
 				continue
 			}
@@ -109,7 +116,7 @@ func ipsFromInterfaces(interfaces []proxmox.NetworkInterface) []inventory.IP {
 		}
 
 		for _, cidr := range []string{iface.Inet, iface.Inet6} {
-			ip := ipFromAddress(cidrAddress(cidr), cidrPrefix(cidr), iface.Name)
+			ip := ipFromAddress(cidrAddress(cidr), cidrPrefix(cidr), iface.Name, mode)
 			if ip == nil || seen[ip.Address] {
 				continue
 			}
@@ -127,7 +134,45 @@ func ipsFromInterfaces(interfaces []proxmox.NetworkInterface) []inventory.IP {
 	return ips
 }
 
-func ipFromAddress(address, prefix, iface string) *inventory.IP {
+func ipsFromGuestConfig(configs map[string]string, mode IPMode) []inventory.IP {
+	seen := make(map[string]bool)
+	ips := make([]inventory.IP, 0)
+
+	keys := make([]string, 0, len(configs))
+	for key := range configs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		for _, field := range strings.Split(configs[key], ",") {
+			name, value, ok := strings.Cut(field, "=")
+			if !ok {
+				continue
+			}
+			name = strings.ToLower(strings.TrimSpace(name))
+			if name != "ip" && name != "ip6" {
+				continue
+			}
+			ip := ipFromAddress(cidrAddress(value), cidrPrefix(value), key, mode)
+			if ip == nil || seen[ip.Address] {
+				continue
+			}
+			seen[ip.Address] = true
+			ips = append(ips, *ip)
+		}
+	}
+
+	sort.Slice(ips, func(i, j int) bool {
+		if ips[i].Version != ips[j].Version {
+			return ips[i].Version < ips[j].Version
+		}
+		return ips[i].Address < ips[j].Address
+	})
+	return ips
+}
+
+func ipFromAddress(address, prefix, iface string, mode IPMode) *inventory.IP {
 	address = strings.TrimSpace(address)
 	if address == "" {
 		return nil
@@ -141,6 +186,9 @@ func ipFromAddress(address, prefix, iface string) *inventory.IP {
 	version := 6
 	if parsed.To4() != nil {
 		version = 4
+	}
+	if !mode.allows(version) {
+		return nil
 	}
 
 	prefixBits := 0
@@ -159,7 +207,24 @@ func ipFromAddress(address, prefix, iface string) *inventory.IP {
 }
 
 func isRoutableGuestIP(ip net.IP) bool {
-	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast()
+	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
+}
+
+func ignoredGuestInterface(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	if name == "lo" || name == "docker0" || name == "podman0" || name == "cni0" {
+		return true
+	}
+	prefixes := []string{"br-", "veth", "virbr", "lxcbr", "flannel", "cali", "nerdctl"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func cidrAddress(cidr string) string {

@@ -56,6 +56,11 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 		return nil, err
 	}
 
+	ipMode, err := inventoryscanner.ParseIPMode(pveConfig.IPMode)
+	if err != nil {
+		return nil, err
+	}
+
 	extractMode, err := labels.ParseExtractMode(config.MetadataMode)
 	if err != nil {
 		return nil, err
@@ -79,6 +84,7 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 		scanner: inventoryscanner.New(client, inventoryscanner.Options{
 			SkipStopped:      pveConfig.SkipStopped,
 			SkipIPResolution: pveConfig.SkipIPResolution,
+			IPMode:           ipMode,
 			Nodes:            pveConfig.Nodes,
 			RequiredTags:     pveConfig.RequiredTags,
 			MaxConcurrency:   pveConfig.MaxConcurrency,

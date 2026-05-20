@@ -36,9 +36,9 @@ func buildTCPRouter(source *labelcfg.Resource, defaultService string) *dynamic.T
 	return router
 }
 
-func buildTCPService(workload inventory.Workload, source *labelcfg.Resource) *dynamic.TCPService {
+func buildTCPService(workload inventory.Workload, source *labelcfg.Resource, options Options) *dynamic.TCPService {
 	loadBalancer := &dynamic.TCPServersLoadBalancer{
-		Servers: buildTCPServers(workload, source),
+		Servers: buildTCPServers(workload, source, options),
 	}
 
 	if terminationDelay, ok := source.IntValue("loadbalancer.terminationdelay"); ok {
@@ -51,8 +51,8 @@ func buildTCPService(workload inventory.Workload, source *labelcfg.Resource) *dy
 	return &dynamic.TCPService{LoadBalancer: loadBalancer}
 }
 
-func buildTCPServers(workload inventory.Workload, source *labelcfg.Resource) []dynamic.TCPServer {
-	addresses := backendAddresses(workload, source)
+func buildTCPServers(workload inventory.Workload, source *labelcfg.Resource, options Options) []dynamic.TCPServer {
+	addresses := backendAddresses(workload, source, options)
 	servers := make([]dynamic.TCPServer, 0, len(addresses))
 	for _, address := range addresses {
 		servers = append(servers, dynamic.TCPServer{Address: address})

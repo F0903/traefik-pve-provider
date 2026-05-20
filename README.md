@@ -33,7 +33,8 @@ providers:
         timeout: "5s"
         insecureSkipVerify: true
         skipStopped: true
-        skipIPResolution: true
+        skipIPResolution: false
+        ipMode: ipv4
         maxConcurrency: 4
         nodes:
           - pve-1
@@ -74,6 +75,9 @@ Additionally, with `defaultDomain` configured, an enabled workload will be autom
 
 For example, with `defaultDomain` set to `example.com` in the plugin configuration, an enabled workload named `app` gets a
 router and service named `app`, a rule of ``Host(`app.example.com`)``. 
+If no usable guest IP is resolved and no explicit backend URL/IP label is set,
+the generated backend server hostname also falls back to this domain, for
+example `http://app.example.com:8080`.
 
 #### Common Shorthand Labels
 
@@ -120,9 +124,34 @@ The plugin currently supports these configuration options:
   - `insecureSkipVerify`: whether to skip TLS certificate verification for the Proxmox API endpoint.
   - `skipStopped`: whether to skip stopped VMs/containers.
   - `skipIPResolution`: whether to skip IP resolution for VMs/containers.
+  - `ipMode`: which resolved guest IP versions to register. Supported values are `ipv4`, `ipv6`, and `ipv4/6`; the default is `ipv4`. This has no effect when `skipIPResolution` is true.
   - `maxConcurrency`: maximum concurrent per-guest PVE API calls during scans.
-  - `nodes`: limits which PVE nodes are scanned.
-  - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
+- `nodes`: limits which PVE nodes are scanned.
+- `requiredTags`: a list of tags that must be present on VMs/containers to be included.
+
+### IP Resolution
+
+When `pve.skipIPResolution` is false, the provider resolves backend IPs before
+building Traefik services.
+
+- `pve.ipMode: ipv4` registers only IPv4 guest IPs. This is the default.
+- `pve.ipMode: ipv6` registers only IPv6 guest IPs.
+- `pve.ipMode: ipv4/6` registers both IPv4 and IPv6 guest IPs.
+
+For VMs, IP discovery prefers QEMU guest-agent interface data and falls back to
+static Cloud-Init `ipconfigN` entries from the VM config when present. For
+containers, IP discovery uses the LXC interface data from Proxmox.
+
+Guest-local bridge/container interfaces such as `docker0`, `br-*`, `veth*`,
+`podman0`, `cni0`, `virbr*`, and `lxcbr*` are ignored so internal Docker or CNI
+gateway addresses do not become Traefik backend servers.
+
+If no usable IP is found, backend servers fall back to
+`<workload-name>.<defaultDomain>` when `defaultDomain` is configured, otherwise
+to the legacy `<workload-name>.<node-name>` hostname. Explicit labels such as
+`ip`, `http.services.<name>.loadbalancer.server.ip`, or
+`http.services.<name>.loadbalancer.server.url` still override automatic
+resolution.
 
 ## Development Notes
 

@@ -109,6 +109,35 @@ func (f fakeAPI) recordCall(key string) {
 	}
 }
 
+func TestParseIPMode(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want IPMode
+	}{
+		{raw: "", want: IPModeIPv4},
+		{raw: "ipv4", want: IPModeIPv4},
+		{raw: "ipv6", want: IPModeIPv6},
+		{raw: "ipv4/6", want: IPModeIPv4IPv6},
+		{raw: "dualstack", want: IPModeIPv4IPv6},
+	}
+
+	for _, test := range tests {
+		got, err := ParseIPMode(test.raw)
+		if err != nil {
+			t.Fatalf("ParseIPMode(%q) error = %v", test.raw, err)
+		}
+		if got != test.want {
+			t.Fatalf("ParseIPMode(%q) = %q, want %q", test.raw, got, test.want)
+		}
+	}
+}
+
+func TestParseIPModeRejectsInvalidValue(t *testing.T) {
+	if _, err := ParseIPMode("ipv5"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestScannerUsesClusterResourcesWhenAvailable(t *testing.T) {
 	calls := make(map[string]int)
 	api := fakeAPI{
@@ -284,6 +313,79 @@ func TestScannerBuildsWorkloadSnapshot(t *testing.T) {
 
 	if len(vm.Tags) != 2 || vm.Tags[0] != "override" || vm.Tags[1] != "tag" {
 		t.Fatalf("vm tags = %#v", vm.Tags)
+	}
+}
+
+func TestScannerUsesVMConfigIPsAsGuestAgentFallback(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "nas", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {
+				Description: "```traefik\nenable=true\n```",
+				IPConfigs: map[string]string{
+					"ipconfig0": "ip=10.0.0.50/24,gw=10.0.0.1",
+				},
+			},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{
+			100: {Result: []proxmox.NetworkInterface{{Name: "docker0", IPAddresses: []proxmox.IPAddress{{Address: "172.17.0.1", Type: "ipv4"}}}}},
+		},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(snapshot.Workloads) != 1 || len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.50" {
+		t.Fatalf("workloads after scan = %#v", snapshot.Workloads)
+	}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.50" {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerPrefersVMGuestAgentIPsOverConfigIPs(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "nas", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {
+				Description: "```traefik\nenable=true\n```",
+				IPConfigs: map[string]string{
+					"ipconfig0": "ip=10.0.0.50/24,gw=10.0.0.1",
+				},
+			},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{
+			100: {Result: []proxmox.NetworkInterface{{Name: "eth0", IPAddresses: []proxmox.IPAddress{{Address: "10.0.0.60", Type: "ipv4"}}}}},
+		},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.60" {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
 	}
 }
 

@@ -173,6 +173,9 @@ func (s *Scanner) applyConfig(workload *inventory.Workload, cfg proxmox.GuestCon
 	if cfg.Tags != "" {
 		workload.Tags = splitTags(cfg.Tags)
 	}
+	if len(cfg.IPConfigs) > 0 {
+		workload.IPs = ipsFromGuestConfig(cfg.IPConfigs, s.ipMode)
+	}
 }
 
 func baseWorkload(kind inventory.Kind, node string, resource proxmox.Resource) inventory.Workload {

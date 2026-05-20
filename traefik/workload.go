@@ -64,7 +64,7 @@ func (b *configBuilder) addTCPWorkload(workload inventory.Workload, names Genera
 	}
 
 	for _, serviceName := range serviceNames {
-		b.config.TCP.Services[serviceName] = buildTCPService(workload, labels.TCP.Services[serviceName])
+		b.config.TCP.Services[serviceName] = buildTCPService(workload, labels.TCP.Services[serviceName], b.options)
 	}
 	for _, routerName := range routerNames {
 		b.config.TCP.Routers[routerName] = buildTCPRouter(labels.TCP.Routers[routerName], b.defaultTCPServiceForRouter(workload, labels, routerName, serviceNames))
@@ -94,7 +94,7 @@ func (b *configBuilder) addUDPWorkload(workload inventory.Workload, names Genera
 	}
 
 	for _, serviceName := range serviceNames {
-		b.config.UDP.Services[serviceName] = buildUDPService(workload, labels.UDP.Services[serviceName])
+		b.config.UDP.Services[serviceName] = buildUDPService(workload, labels.UDP.Services[serviceName], b.options)
 	}
 	for _, routerName := range routerNames {
 		b.config.UDP.Routers[routerName] = buildUDPRouter(labels.UDP.Routers[routerName], b.defaultUDPServiceForRouter(workload, labels, routerName, serviceNames))

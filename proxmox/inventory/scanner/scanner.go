@@ -2,7 +2,9 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/F0903/traefik-pve-provider/proxmox"
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
@@ -10,7 +12,18 @@ import (
 
 const defaultMaxConcurrency = 4
 
-// Needed intstead of min for Yeagi compatibility
+type IPMode string
+
+const (
+	IPModeIPv4      IPMode = "ipv4"
+	IPModeIPv6      IPMode = "ipv6"
+	IPModeIPv4IPv6  IPMode = "ipv4/6"
+	IPModeDualStack IPMode = "dualstack"
+)
+
+var ErrInvalidIPMode = errors.New("invalid IP mode")
+
+// Needed instead of min for Yaegi compatibility.
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -32,6 +45,7 @@ type ProxmoxAPI interface {
 type Options struct {
 	SkipStopped      bool
 	SkipIPResolution bool
+	IPMode           IPMode
 	Nodes            []string
 	RequiredTags     []string
 	MaxConcurrency   int
@@ -44,6 +58,7 @@ type Scanner struct {
 	includedNodes     map[string]bool
 	requiredTags      []string
 	maxConcurrency    int
+	ipMode            IPMode
 }
 
 func New(api ProxmoxAPI, options Options) *Scanner {
@@ -54,6 +69,43 @@ func New(api ProxmoxAPI, options Options) *Scanner {
 		includedNodes:     normalizedSet(options.Nodes),
 		requiredTags:      normalizedList(options.RequiredTags),
 		maxConcurrency:    normalizedMaxConcurrency(options.MaxConcurrency),
+		ipMode:            normalizedIPMode(options.IPMode),
+	}
+}
+
+func ParseIPMode(raw string) (IPMode, error) {
+	if raw == "" {
+		return IPModeIPv4, nil
+	}
+
+	switch mode := IPMode(strings.ToLower(strings.TrimSpace(raw))); mode {
+	case IPModeIPv4, "4":
+		return IPModeIPv4, nil
+	case IPModeIPv6, "6":
+		return IPModeIPv6, nil
+	case IPModeIPv4IPv6, IPModeDualStack, "dual-stack", "both", "all", "ipv4+ipv6", "ipv4,ipv6":
+		return IPModeIPv4IPv6, nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrInvalidIPMode, raw)
+	}
+}
+
+func normalizedIPMode(mode IPMode) IPMode {
+	parsed, err := ParseIPMode(string(mode))
+	if err != nil {
+		return IPModeIPv4
+	}
+	return parsed
+}
+
+func (m IPMode) allows(version int) bool {
+	switch normalizedIPMode(m) {
+	case IPModeIPv6:
+		return version == 6
+	case IPModeIPv4IPv6:
+		return version == 4 || version == 6
+	default:
+		return version == 4
 	}
 }
 

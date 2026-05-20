@@ -12,6 +12,7 @@ testData:
     insecureSkipVerify: true
     skipStopped: true
     skipIPResolution: true
+    ipMode: "ipv4"
     maxConcurrency: 4
   metadataMode: "fenced"
   defaultDomain: "example.com"

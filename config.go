@@ -11,6 +11,7 @@ const (
 	defaultPollInterval      = 60 * time.Second
 	defaultPVETimeout        = 30 * time.Second
 	defaultPVEMaxConcurrency = 4
+	defaultPVEIPMode         = "ipv4"
 	minPollInterval          = 5 * time.Second
 )
 
@@ -29,6 +30,7 @@ type PVEConfig struct {
 	InsecureSkipVerify bool     `json:"insecureSkipVerify,omitempty" yaml:"insecureSkipVerify,omitempty" toml:"insecureSkipVerify,omitempty"`
 	SkipStopped        bool     `json:"skipStopped,omitempty" yaml:"skipStopped,omitempty" toml:"skipStopped,omitempty"`
 	SkipIPResolution   bool     `json:"skipIPResolution,omitempty" yaml:"skipIPResolution,omitempty" toml:"skipIPResolution,omitempty"`
+	IPMode             string   `json:"ipMode,omitempty" yaml:"ipMode,omitempty" toml:"ipMode,omitempty"`
 	Nodes              []string `json:"nodes,omitempty" yaml:"nodes,omitempty" toml:"nodes,omitempty"`
 	RequiredTags       []string `json:"requiredTags,omitempty" yaml:"requiredTags,omitempty" toml:"requiredTags,omitempty"`
 	MaxConcurrency     int      `json:"maxConcurrency,omitempty" yaml:"maxConcurrency,omitempty" toml:"maxConcurrency,omitempty"`
@@ -41,6 +43,7 @@ func CreateConfig() *Config {
 		PVE: PVEConfig{
 			Timeout:        defaultPVETimeout.String(),
 			SkipStopped:    true,
+			IPMode:         defaultPVEIPMode,
 			MaxConcurrency: defaultPVEMaxConcurrency,
 		},
 	}

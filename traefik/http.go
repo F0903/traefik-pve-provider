@@ -37,7 +37,7 @@ func buildHTTPRouter(source *labelcfg.Resource, routerName, defaultService strin
 	return router
 }
 
-func buildHTTPService(workload inventory.Workload, source *labelcfg.Resource) *dynamic.Service {
+func buildHTTPService(workload inventory.Workload, source *labelcfg.Resource, options Options) *dynamic.Service {
 	passHostHeader := true
 	if parsed, ok := source.BoolValue("loadbalancer.passhostheader"); ok {
 		passHostHeader = parsed
@@ -45,7 +45,7 @@ func buildHTTPService(workload inventory.Workload, source *labelcfg.Resource) *d
 
 	loadBalancer := &dynamic.ServersLoadBalancer{
 		PassHostHeader: &passHostHeader,
-		Servers:        buildHTTPServers(workload, source),
+		Servers:        buildHTTPServers(workload, source, options),
 	}
 
 	if healthCheck := buildHealthCheck(source); healthCheck != nil {
@@ -123,7 +123,7 @@ func buildForwardingTimeouts(source *labelcfg.Resource) *dynamic.ForwardingTimeo
 	return timeouts
 }
 
-func buildHTTPServers(workload inventory.Workload, source *labelcfg.Resource) []dynamic.Server {
+func buildHTTPServers(workload inventory.Workload, source *labelcfg.Resource, options Options) []dynamic.Server {
 	if url, ok := source.StringValue("loadbalancer.server.url"); ok {
 		return []dynamic.Server{{URL: url}}
 	}
@@ -144,7 +144,7 @@ func buildHTTPServers(workload inventory.Workload, source *labelcfg.Resource) []
 		return servers
 	}
 
-	return []dynamic.Server{{URL: serverURL(scheme, workload.Name+"."+workload.Node, port)}}
+	return []dynamic.Server{{URL: serverURL(scheme, fallbackBackendHost(workload, options), port)}}
 }
 
 func serviceSchemeAndPort(source *labelcfg.Resource) (string, string) {

@@ -10,7 +10,7 @@ import (
 	labelcfg "github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
-func backendAddresses(workload inventory.Workload, source *labelcfg.Resource) []string {
+func backendAddresses(workload inventory.Workload, source *labelcfg.Resource, options Options) []string {
 	if address, ok := source.StringValue("loadbalancer.server.address"); ok {
 		return []string{address}
 	}
@@ -34,7 +34,25 @@ func backendAddresses(workload inventory.Workload, source *labelcfg.Resource) []
 		return addresses
 	}
 
-	return []string{serverAddress(workload.Name+"."+workload.Node, port)}
+	return []string{serverAddress(fallbackBackendHost(workload, options), port)}
+}
+
+func fallbackBackendHost(workload inventory.Workload, options Options) string {
+	rawName := strings.TrimSpace(workload.Name)
+	name := normalizeGeneratedName(workload.Name)
+	if name == "" {
+		name = "workload"
+	}
+	if rawName == "" {
+		rawName = name
+	}
+	if domain := strings.Trim(strings.TrimSpace(options.DefaultDomain), "."); domain != "" {
+		return name + "." + domain
+	}
+	if node := strings.TrimSpace(workload.Node); node != "" {
+		return rawName + "." + node
+	}
+	return rawName
 }
 
 func serverURL(scheme, host, port string) string {
