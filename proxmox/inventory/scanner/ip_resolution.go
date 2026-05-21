@@ -48,26 +48,46 @@ func (s *Scanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workloa
 }
 
 func (s *Scanner) resolveWorkloadIPs(ctx context.Context, workload *inventory.Workload) {
+	interfacePatterns, explicitInterfaceFilter := s.interfacePatternsFor(workload)
+	hasInterfaceFilter := len(interfacePatterns) > 0
 	switch workload.Kind {
 	case inventory.KindVM:
 		interfaces, err := s.api.VMNetworkInterfaces(ctx, workload.Node, workload.ID)
 		if err != nil {
+			if explicitInterfaceFilter && hasInterfaceFilter {
+				workload.IPs = nil
+			}
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
 			return
 		}
-		if ips := ipsFromInterfaces(interfaces.Result, s.ipMode); len(ips) > 0 {
+		if ips := ipsFromInterfaces(interfaces.Result, s.ipMode, interfacePatterns); len(ips) > 0 {
 			workload.IPs = ips
+		} else if explicitInterfaceFilter && hasInterfaceFilter {
+			workload.IPs = nil
 		}
 	case inventory.KindContainer:
 		interfaces, err := s.api.ContainerInterfaces(ctx, workload.Node, workload.ID)
 		if err != nil {
+			if explicitInterfaceFilter && hasInterfaceFilter {
+				workload.IPs = nil
+			}
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
 			return
 		}
-		if ips := ipsFromInterfaces(interfaces, s.ipMode); len(ips) > 0 {
+		if ips := ipsFromInterfaces(interfaces, s.ipMode, interfacePatterns); len(ips) > 0 {
 			workload.IPs = ips
+		} else if explicitInterfaceFilter && hasInterfaceFilter {
+			workload.IPs = nil
 		}
 	}
+}
+
+func (s *Scanner) interfacePatternsFor(workload *inventory.Workload) ([]string, bool) {
+	patterns := normalizedInterfacePatterns(workload.InterfacePatterns)
+	if len(patterns) > 0 {
+		return patterns, true
+	}
+	return s.defaultInterfaces, false
 }
 
 type workloadKey struct {
@@ -98,12 +118,13 @@ func ipResolutionTargets(workloads []*inventory.Workload) []*inventory.Workload 
 	return targets
 }
 
-func ipsFromInterfaces(interfaces []proxmox.NetworkInterface, mode IPMode) []inventory.IP {
+func ipsFromInterfaces(interfaces []proxmox.NetworkInterface, mode IPMode, interfacePatterns []string) []inventory.IP {
+	interfacePatterns = normalizedInterfacePatterns(interfacePatterns)
 	seen := make(map[string]bool)
 	ips := make([]inventory.IP, 0)
 
 	for _, iface := range interfaces {
-		if ignoredGuestInterface(iface.Name) {
+		if !allowedGuestInterface(iface.Name, interfacePatterns) {
 			continue
 		}
 		for _, ipAddress := range iface.IPAddresses {
@@ -210,21 +231,30 @@ func isRoutableGuestIP(ip net.IP) bool {
 	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
-func ignoredGuestInterface(name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return false
-	}
-	if name == "lo" || name == "docker0" || name == "podman0" || name == "cni0" {
+func allowedGuestInterface(name string, patterns []string) bool {
+	if len(patterns) == 0 {
 		return true
 	}
-	prefixes := []string{"br-", "veth", "virbr", "lxcbr", "flannel", "cali", "nerdctl"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(name, prefix) {
+	for _, pattern := range patterns {
+		if matchGlob(pattern, name) {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizedInterfacePatterns(patterns []string) []string {
+	normalized := make([]string, 0, len(patterns))
+	seen := make(map[string]bool, len(patterns))
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" || seen[pattern] {
+			continue
+		}
+		seen[pattern] = true
+		normalized = append(normalized, pattern)
+	}
+	return normalized
 }
 
 func cidrAddress(cidr string) string {

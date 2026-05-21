@@ -17,7 +17,7 @@ func TestIPsFromInterfacesSortsStableRoutableIPs(t *testing.T) {
 			},
 			Inet6: "fd00::10/64",
 		},
-	}, IPModeIPv4IPv6)
+	}, IPModeIPv4IPv6, nil)
 
 	if len(ips) != 3 {
 		t.Fatalf("ips = %#v", ips)
@@ -36,7 +36,7 @@ func TestIPsFromInterfacesDefaultsToIPv4(t *testing.T) {
 				{Address: "fd00::10", Type: "ipv6"},
 			},
 		},
-	}, "")
+	}, "", nil)
 
 	if len(ips) != 1 || ips[0].Address != "10.0.0.10" {
 		t.Fatalf("ips = %#v", ips)
@@ -52,14 +52,14 @@ func TestIPsFromInterfacesHonorsIPv6Mode(t *testing.T) {
 				{Address: "fd00::10", Type: "ipv6"},
 			},
 		},
-	}, IPModeIPv6)
+	}, IPModeIPv6, nil)
 
 	if len(ips) != 1 || ips[0].Address != "fd00::10" {
 		t.Fatalf("ips = %#v", ips)
 	}
 }
 
-func TestIPsFromInterfacesIgnoresLocalBridgeInterfaces(t *testing.T) {
+func TestIPsFromInterfacesFiltersByDefaultInterfacePatterns(t *testing.T) {
 	ips := ipsFromInterfaces([]proxmox.NetworkInterface{
 		{
 			Name: "docker0",
@@ -79,9 +79,81 @@ func TestIPsFromInterfacesIgnoresLocalBridgeInterfaces(t *testing.T) {
 				{Address: "10.0.0.10", Type: "ipv4"},
 			},
 		},
-	}, IPModeIPv4)
+		{
+			Name: "enp6s0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.0.0.20", Type: "ipv4"},
+			},
+		},
+	}, IPModeIPv4, DefaultInterfacePatterns())
 
-	if len(ips) != 1 || ips[0].Address != "10.0.0.10" {
+	if len(ips) != 2 || ips[0].Address != "10.0.0.10" || ips[1].Address != "10.0.0.20" {
+		t.Fatalf("ips = %#v", ips)
+	}
+}
+
+func TestIPsFromInterfacesHonorsInterfacePatterns(t *testing.T) {
+	ips := ipsFromInterfaces([]proxmox.NetworkInterface{
+		{
+			Name: "eth0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.0.0.10", Type: "ipv4"},
+			},
+		},
+		{
+			Name: "ens18",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.0.0.18", Type: "ipv4"},
+			},
+		},
+		{
+			Name: "wg0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.20.0.1", Type: "ipv4"},
+			},
+		},
+	}, IPModeIPv4, []string{"eth*", "ens18"})
+
+	if len(ips) != 2 {
+		t.Fatalf("ips = %#v", ips)
+	}
+	if ips[0].Address != "10.0.0.10" || ips[1].Address != "10.0.0.18" {
+		t.Fatalf("ips = %#v", ips)
+	}
+}
+
+func TestIPsFromInterfacesAllowsAnyInterfaceWhenWildcardMatches(t *testing.T) {
+	ips := ipsFromInterfaces([]proxmox.NetworkInterface{
+		{
+			Name: "docker0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "172.17.0.1", Type: "ipv4"},
+			},
+		},
+		{
+			Name: "eth0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.0.0.10", Type: "ipv4"},
+			},
+		},
+	}, IPModeIPv4, []string{"*"})
+
+	if len(ips) != 2 {
+		t.Fatalf("ips = %#v", ips)
+	}
+}
+
+func TestIPsFromInterfacesReturnsEmptyWhenNoInterfacePatternMatches(t *testing.T) {
+	ips := ipsFromInterfaces([]proxmox.NetworkInterface{
+		{
+			Name: "wg0",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.20.0.1", Type: "ipv4"},
+			},
+		},
+	}, IPModeIPv4, []string{"eth*"})
+
+	if len(ips) != 0 {
 		t.Fatalf("ips = %#v", ips)
 	}
 }

@@ -13,15 +13,16 @@ type Snapshot struct {
 }
 
 type Workload struct {
-	Kind     Kind
-	Node     string
-	ID       int
-	Name     string
-	Status   string
-	Tags     []string
-	Notes    string
-	IPs      []IP
-	Problems []Problem
+	Kind              Kind
+	Node              string
+	ID                int
+	Name              string
+	Status            string
+	Tags              []string
+	Notes             string
+	IPs               []IP
+	InterfacePatterns []string
+	Problems          []Problem
 }
 
 type IP struct {

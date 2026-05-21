@@ -13,6 +13,10 @@ testData:
     skipStopped: true
     skipIPResolution: true
     ipMode: "ipv4"
+    defaultInterfaces:
+      - "eth*"
+      - "enp*"
+      - "eno*"
     maxConcurrency: 4
   metadataMode: "fenced"
   defaultDomain: "example.com"

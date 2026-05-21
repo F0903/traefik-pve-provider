@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
+	inventoryscanner "github.com/F0903/traefik-pve-provider/proxmox/inventory/scanner"
 	"github.com/F0903/traefik-pve-provider/traefik"
 )
 
@@ -24,6 +25,7 @@ func TestNewAcceptsCatalogTestDataShape(t *testing.T) {
 			SkipStopped:        true,
 			SkipIPResolution:   true,
 			IPMode:             "ipv4/6",
+			DefaultInterfaces:  []string{"eth*", "enp*"},
 			MaxConcurrency:     4,
 		},
 		MetadataMode:  "fenced",
@@ -37,6 +39,9 @@ func TestNewAcceptsCatalogTestDataShape(t *testing.T) {
 	}
 	if provider.configOptions.DefaultDomain != "example.com" {
 		t.Fatalf("default domain = %q", provider.configOptions.DefaultDomain)
+	}
+	if len(provider.scanner.(*inventoryscanner.Scanner).DefaultInterfaces()) != 2 {
+		t.Fatalf("default interfaces were not configured")
 	}
 }
 

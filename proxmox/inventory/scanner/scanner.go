@@ -12,6 +12,8 @@ import (
 
 const defaultMaxConcurrency = 4
 
+var defaultInterfacePatterns = []string{"eth*", "enp*", "eno*"}
+
 type IPMode string
 
 const (
@@ -43,12 +45,13 @@ type ProxmoxAPI interface {
 }
 
 type Options struct {
-	SkipStopped      bool
-	SkipIPResolution bool
-	IPMode           IPMode
-	Nodes            []string
-	RequiredTags     []string
-	MaxConcurrency   int
+	SkipStopped       bool
+	SkipIPResolution  bool
+	IPMode            IPMode
+	DefaultInterfaces []string
+	Nodes             []string
+	RequiredTags      []string
+	MaxConcurrency    int
 }
 
 type Scanner struct {
@@ -59,6 +62,7 @@ type Scanner struct {
 	requiredTags      []string
 	maxConcurrency    int
 	ipMode            IPMode
+	defaultInterfaces []string
 }
 
 func New(api ProxmoxAPI, options Options) *Scanner {
@@ -70,7 +74,29 @@ func New(api ProxmoxAPI, options Options) *Scanner {
 		requiredTags:      normalizedList(options.RequiredTags),
 		maxConcurrency:    normalizedMaxConcurrency(options.MaxConcurrency),
 		ipMode:            normalizedIPMode(options.IPMode),
+		defaultInterfaces: normalizedDefaultInterfaces(options.DefaultInterfaces),
 	}
+}
+
+func DefaultInterfacePatterns() []string {
+	return cloneStringSlice(defaultInterfacePatterns)
+}
+
+func (s *Scanner) DefaultInterfaces() []string {
+	return cloneStringSlice(s.defaultInterfaces)
+}
+
+func normalizedDefaultInterfaces(patterns []string) []string {
+	if patterns == nil {
+		return DefaultInterfacePatterns()
+	}
+	return normalizedInterfacePatterns(patterns)
+}
+
+func cloneStringSlice(values []string) []string {
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 func ParseIPMode(raw string) (IPMode, error) {

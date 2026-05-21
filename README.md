@@ -1,23 +1,31 @@
 # Traefik PVE Provider
 
-Automatically provision Traefik routers and services via your PVE container/vm notes.
+Automatically create Traefik routers and services via your PVE container/VM notes.
 
 Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider) but with simpler configuration and a larger feature-set.
-> Note that this is not a fork, but a fully from-scratch project.
+> Note that this is not a fork, but a project built from scratch.
 
 ## Traefik Installation
 
-Static configuration:
+To install the plugin, add the following two blocks to your Traefik configuration.
+
+First, define the plugin with the name and version as follows:
+
+> This **needs** to go in your static Traefik configuration. *(usually called `traefik.yml`)*
 
 ```yaml
 experimental:
   plugins:
     traefik-pve-provider:
       moduleName: github.com/F0903/traefik-pve-provider
-      version: v0.10.0
+      version: v0.11.0
 ```
 
-Provider configuration:
+Secondly, define the plugin as a provider along with your preferred settings:
+
+> This can either go in your static or dynamic Traefik configuration.
+
+Also note that the following is an example, some of the settings are optional and can be omitted.
 
 ```yaml
 providers:
@@ -35,6 +43,10 @@ providers:
         skipStopped: true
         skipIPResolution: false
         ipMode: ipv4
+        defaultInterfaces:
+          - eth*
+          - enp*
+          - eno*
         maxConcurrency: 4
         nodes:
           - pve-1
@@ -123,11 +135,12 @@ The plugin currently supports these configuration options:
   - `timeout`: the Proxmox API HTTP request timeout.
   - `insecureSkipVerify`: whether to skip TLS certificate verification for the Proxmox API endpoint.
   - `skipStopped`: whether to skip stopped VMs/containers.
-  - `skipIPResolution`: whether to skip IP resolution for VMs/containers.
+  - `skipIPResolution`: whether to skip automatic IP resolution for VMs/containers.
   - `ipMode`: which resolved guest IP versions to register. Supported values are `ipv4`, `ipv6`, and `ipv4/6`; the default is `ipv4`. This has no effect when `skipIPResolution` is true.
+  - `defaultInterfaces`: default guest interface name patterns used for automatic IP resolution. The default is `eth*`, `enp*`, and `eno*`.
   - `maxConcurrency`: maximum concurrent per-guest PVE API calls during scans.
-- `nodes`: limits which PVE nodes are scanned.
-- `requiredTags`: a list of tags that must be present on VMs/containers to be included.
+  - `nodes`: limits which PVE nodes are scanned.
+  - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
 
 ### IP Resolution
 
@@ -137,14 +150,29 @@ building Traefik services.
 - `pve.ipMode: ipv4` registers only IPv4 guest IPs. This is the default.
 - `pve.ipMode: ipv6` registers only IPv6 guest IPs.
 - `pve.ipMode: ipv4/6` registers both IPv4 and IPv6 guest IPs.
+- `pve.defaultInterfaces` controls which guest interfaces are considered when
+  no workload-specific `pve.interfaces` label is set. By default this is
+  `eth*`, `enp*`, and `eno*`.
 
 For VMs, IP discovery prefers QEMU guest-agent interface data and falls back to
 static Cloud-Init `ipconfigN` entries from the VM config when present. For
 containers, IP discovery uses the LXC interface data from Proxmox.
 
-Guest-local bridge/container interfaces such as `docker0`, `br-*`, `veth*`,
-`podman0`, `cni0`, `virbr*`, and `lxcbr*` are ignored so internal Docker or CNI
-gateway addresses do not become Traefik backend servers.
+To limit automatic IP resolution to specific guest interfaces for one workload,
+add a `pve.interfaces` label inside that workload's Traefik note block:
+
+```traefik
+enable=true
+port=8080
+pve.interfaces=eth*,ens18
+```
+
+The value is a comma-separated list of interface name patterns. `*` matches any
+sequence and `?` matches one character, so `eth*` matches `eth0`, `eth1`, and
+similar names. When `pve.interfaces` is set, it overrides
+`pve.defaultInterfaces`, and only matching guest-agent/LXC interfaces are
+considered. If no matching interface provides a usable IP, the service falls
+back to the configured backend hostname behavior.
 
 If no usable IP is found, backend servers fall back to
 `<workload-name>.<defaultDomain>` when `defaultDomain` is configured, otherwise

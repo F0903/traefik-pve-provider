@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	inventoryscanner "github.com/F0903/traefik-pve-provider/proxmox/inventory/scanner"
 	"github.com/F0903/traefik-pve-provider/traefik/labels"
 )
 
@@ -31,6 +32,7 @@ type PVEConfig struct {
 	SkipStopped        bool     `json:"skipStopped,omitempty" yaml:"skipStopped,omitempty" toml:"skipStopped,omitempty"`
 	SkipIPResolution   bool     `json:"skipIPResolution,omitempty" yaml:"skipIPResolution,omitempty" toml:"skipIPResolution,omitempty"`
 	IPMode             string   `json:"ipMode,omitempty" yaml:"ipMode,omitempty" toml:"ipMode,omitempty"`
+	DefaultInterfaces  []string `json:"defaultInterfaces,omitempty" yaml:"defaultInterfaces,omitempty" toml:"defaultInterfaces,omitempty"`
 	Nodes              []string `json:"nodes,omitempty" yaml:"nodes,omitempty" toml:"nodes,omitempty"`
 	RequiredTags       []string `json:"requiredTags,omitempty" yaml:"requiredTags,omitempty" toml:"requiredTags,omitempty"`
 	MaxConcurrency     int      `json:"maxConcurrency,omitempty" yaml:"maxConcurrency,omitempty" toml:"maxConcurrency,omitempty"`
@@ -41,10 +43,11 @@ func CreateConfig() *Config {
 		PollInterval: defaultPollInterval.String(),
 		MetadataMode: string(labels.ExtractModeFenced),
 		PVE: PVEConfig{
-			Timeout:        defaultPVETimeout.String(),
-			SkipStopped:    true,
-			IPMode:         defaultPVEIPMode,
-			MaxConcurrency: defaultPVEMaxConcurrency,
+			Timeout:           defaultPVETimeout.String(),
+			SkipStopped:       true,
+			IPMode:            defaultPVEIPMode,
+			DefaultInterfaces: inventoryscanner.DefaultInterfacePatterns(),
+			MaxConcurrency:    defaultPVEMaxConcurrency,
 		},
 	}
 }

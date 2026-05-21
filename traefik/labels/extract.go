@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 const DefaultPrefix = "traefik."
+const ProviderPrefix = "pve."
 const codeFenceMarker = "```"
 
 type ExtractMode string
@@ -19,9 +21,8 @@ const (
 )
 
 var (
-	ErrInvalidMode        = errors.New("invalid extraction mode")
-	defaultLabelStartExpr = regexp.MustCompile(`(?i)(^|\s)(traefik\.)`)
-	labelKeySuffixExpr    = regexp.MustCompile(`(?i)^[a-z0-9_.\-\[\]]+$`)
+	ErrInvalidMode     = errors.New("invalid extraction mode")
+	labelKeySuffixExpr = regexp.MustCompile(`(?i)^[a-z0-9_.\-\[\]]+$`)
 )
 
 type ExtractDiagnostic struct {
@@ -206,7 +207,7 @@ func (e Extractor) extractLooseLine(line string, lineNumber int, prefix string, 
 		key = normalizeKey(key)
 		value = normalizeValue(value)
 
-		if !strings.HasPrefix(key, prefix) {
+		if !strings.HasPrefix(key, prefix) && !strings.HasPrefix(key, ProviderPrefix) {
 			continue
 		}
 		e.storeLabel(key, value, fragment, lineNumber, prefix, result)
@@ -273,7 +274,7 @@ func normalizeKey(key string) string {
 func normalizeFencedKey(key, prefix string) string {
 	key = normalizeKey(key)
 	prefix = normalizePrefix(prefix)
-	if strings.HasPrefix(key, prefix) {
+	if strings.HasPrefix(key, prefix) || strings.HasPrefix(key, ProviderPrefix) {
 		return key
 	}
 	return prefix + key
@@ -298,16 +299,25 @@ func normalizeValue(value string) string {
 }
 
 func labelStarts(input, prefix string) []int {
-	if !strings.EqualFold(prefix, DefaultPrefix) {
-		return customLabelStarts(input, prefix)
+	starts := customLabelStarts(input, prefix)
+	if !strings.EqualFold(normalizePrefix(prefix), ProviderPrefix) {
+		starts = append(starts, customLabelStarts(input, ProviderPrefix)...)
+	}
+	if len(starts) < 2 {
+		return starts
 	}
 
-	matches := defaultLabelStartExpr.FindAllStringSubmatchIndex(input, -1)
-	starts := make([]int, 0, len(matches))
-	for _, match := range matches {
-		starts = append(starts, match[4])
+	sort.Ints(starts)
+	unique := starts[:0]
+	last := -1
+	for _, start := range starts {
+		if start == last {
+			continue
+		}
+		unique = append(unique, start)
+		last = start
 	}
-	return starts
+	return unique
 }
 
 func customLabelStarts(input, prefix string) []int {
@@ -332,6 +342,10 @@ func customLabelStarts(input, prefix string) []int {
 }
 
 func validLabelKey(key, prefix string) bool {
+	if strings.HasPrefix(key, ProviderPrefix) {
+		suffix := strings.TrimPrefix(key, ProviderPrefix)
+		return suffix != "" && labelKeySuffixExpr.MatchString(suffix)
+	}
 	if !strings.HasPrefix(key, prefix) {
 		return false
 	}

@@ -389,6 +389,179 @@ func TestScannerPrefersVMGuestAgentIPsOverConfigIPs(t *testing.T) {
 	}
 }
 
+func TestScannerAppliesWorkloadInterfacePatterns(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms:   map[string][]proxmox.Resource{},
+		containers: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 200, Name: "panel", Status: "running"}},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{},
+		containerConfigs: map[int]proxmox.GuestConfig{
+			200: {Description: "```traefik\nenable=true\n```"},
+		},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{
+			200: {
+				{Name: "pterodactyl0", Inet: "172.18.0.1/16"},
+				{Name: "eth0", Inet: "10.0.0.20/24"},
+			},
+		},
+		configErr: map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	snapshot.Workloads[0].InterfacePatterns = []string{"eth*"}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.20" {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerAppliesDefaultInterfacePatterns(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms:   map[string][]proxmox.Resource{},
+		containers: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 200, Name: "panel", Status: "running"}},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{},
+		containerConfigs: map[int]proxmox.GuestConfig{
+			200: {Description: "```traefik\nenable=true\n```"},
+		},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{
+			200: {
+				{Name: "pterodactyl0", Inet: "172.18.0.1/16"},
+				{Name: "wg0", Inet: "10.20.0.1/24"},
+				{Name: "enp6s0", Inet: "10.0.0.20/24"},
+			},
+		},
+		configErr: map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.20" {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerAllowsCustomDefaultInterfacePatterns(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms:   map[string][]proxmox.Resource{},
+		containers: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 200, Name: "panel", Status: "running"}},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{},
+		containerConfigs: map[int]proxmox.GuestConfig{
+			200: {Description: "```traefik\nenable=true\n```"},
+		},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{
+			200: {
+				{Name: "wg0", Inet: "10.20.0.1/24"},
+				{Name: "eth0", Inet: "10.0.0.20/24"},
+			},
+		},
+		configErr: map[int]error{},
+	}
+
+	scanner := New(api, Options{DefaultInterfaces: []string{"wg*"}})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.20.0.1" {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerAllowsEmptyDefaultInterfacePatterns(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms:   map[string][]proxmox.Resource{},
+		containers: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 200, Name: "panel", Status: "running"}},
+		},
+		vmConfigs: map[int]proxmox.GuestConfig{},
+		containerConfigs: map[int]proxmox.GuestConfig{
+			200: {Description: "```traefik\nenable=true\n```"},
+		},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{
+			200: {
+				{Name: "pterodactyl0", Inet: "172.18.0.1/16"},
+				{Name: "eth0", Inet: "10.0.0.20/24"},
+			},
+		},
+		configErr: map[int]error{},
+	}
+
+	scanner := New(api, Options{DefaultInterfaces: []string{}})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 2 {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
+func TestScannerClearsConfigIPsWhenExplicitInterfacePatternsDoNotMatch(t *testing.T) {
+	api := fakeAPI{
+		nodes: []proxmox.Node{{Name: "pve-1"}},
+		vms: map[string][]proxmox.Resource{
+			"pve-1": {{VMID: 100, Name: "nas", Status: "running"}},
+		},
+		containers: map[string][]proxmox.Resource{},
+		vmConfigs: map[int]proxmox.GuestConfig{
+			100: {
+				Description: "```traefik\nenable=true\n```",
+				IPConfigs: map[string]string{
+					"ipconfig0": "ip=10.0.0.50/24",
+				},
+			},
+		},
+		containerConfigs: map[int]proxmox.GuestConfig{},
+		vmInterfaces: map[int]proxmox.GuestAgentInterfaces{
+			100: {Result: []proxmox.NetworkInterface{{Name: "wg0", IPAddresses: []proxmox.IPAddress{{Address: "10.20.0.1", Type: "ipv4"}}}}},
+		},
+		containerInterfaces: map[int][]proxmox.NetworkInterface{},
+		configErr:           map[int]error{},
+	}
+
+	scanner := New(api, Options{})
+	snapshot, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(snapshot.Workloads[0].IPs) != 1 || snapshot.Workloads[0].IPs[0].Address != "10.0.0.50" {
+		t.Fatalf("workloads after Scan = %#v", snapshot.Workloads)
+	}
+	snapshot.Workloads[0].InterfacePatterns = []string{"eth*"}
+
+	scanner.ResolveIPs(context.Background(), []*inventory.Workload{&snapshot.Workloads[0]})
+	if len(snapshot.Workloads[0].IPs) != 0 {
+		t.Fatalf("workloads after ResolveIPs = %#v", snapshot.Workloads)
+	}
+}
+
 func TestScannerRecordsConfigProblem(t *testing.T) {
 	api := fakeAPI{
 		nodes: []proxmox.Node{{Name: "pve-1"}},

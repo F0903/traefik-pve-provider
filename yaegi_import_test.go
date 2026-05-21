@@ -96,12 +96,15 @@ var _ = func() bool {
 				Name:   "app",
 				Status: "running",
 				IPs:    []inventory.IP{{Address: "10.0.0.10", Version: 4}},
-				Notes:  fence + "traefik\nenable=true\nport=8080\n" + fence,
+				Notes:  fence + "traefik\nenable=true\nport=8080\npve.interfaces=eth*\n" + fence,
 			},
 		},
 	}, tconfig.PrepareOptions{})
 	if len(prepared.Workloads) != 1 || !prepared.Workloads[0].Labels.Enabled() {
 		panic("workload labels were not prepared")
+	}
+	if len(prepared.Workloads[0].Workload.InterfacePatterns) != 1 || prepared.Workloads[0].Workload.InterfacePatterns[0] != "eth*" {
+		panic("provider interface metadata was not prepared")
 	}
 
 	config := tconfig.BuildPreparedConfiguration(prepared, tconfig.Options{DefaultDomain: "example.com"})

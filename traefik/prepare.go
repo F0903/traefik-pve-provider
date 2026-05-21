@@ -44,6 +44,7 @@ func Prepare(snapshot inventory.Snapshot, options PrepareOptions) PreparedSnapsh
 
 func prepareWorkload(workload inventory.Workload, extractor labelcfg.Extractor) PreparedWorkload {
 	extracted := extractor.Extract(workload.Notes)
+	workload.InterfacePatterns = providerInterfacePatterns(extracted.Labels)
 	names := generatedNamesForWorkload(workload)
 	labels, nameDiagnostics := labelsForGeneratedNames(extracted.Labels, names.Base)
 	names.Diagnostics = append(names.Diagnostics, nameDiagnostics...)

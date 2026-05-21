@@ -94,6 +94,20 @@ func TestExtractFencedAcceptsPrefixlessKeys(t *testing.T) {
 	}
 }
 
+func TestExtractFencedAcceptsProviderMetadataLabels(t *testing.T) {
+	result := Extract("```traefik\nenable=true\npve.interfaces=eth*,ens18\n```")
+
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, want empty", result.Diagnostics)
+	}
+	if got := result.Labels["traefik.enable"]; got != "true" {
+		t.Fatalf("traefik.enable = %q, want true", got)
+	}
+	if got := result.Labels["pve.interfaces"]; got != "eth*,ens18" {
+		t.Fatalf("pve.interfaces = %q", got)
+	}
+}
+
 func TestExtractFencedTreatsPrefixedAndPrefixlessKeysAsDuplicates(t *testing.T) {
 	result := Extract("```traefik\nenable=false\ntraefik.enable=true\n```")
 
@@ -128,13 +142,16 @@ func TestExtractFencedReportsUnterminatedBlock(t *testing.T) {
 }
 
 func TestExtractLooseModeWhitespaceSeparatedLabels(t *testing.T) {
-	result := Extractor{Mode: ExtractModeLoose}.Extract("traefik.enable=true traefik.http.routers.app.entrypoints=websecure traefik.http.services.app.loadbalancer.server.port=8080")
+	result := Extractor{Mode: ExtractModeLoose}.Extract("traefik.enable=true pve.interfaces=eth* traefik.http.routers.app.entrypoints=websecure traefik.http.services.app.loadbalancer.server.port=8080")
 
 	if len(result.Diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
 	}
-	if len(result.Labels) != 3 {
-		t.Fatalf("label count = %d, want 3", len(result.Labels))
+	if len(result.Labels) != 4 {
+		t.Fatalf("label count = %d, want 4", len(result.Labels))
+	}
+	if got := result.Labels["pve.interfaces"]; got != "eth*" {
+		t.Fatalf("pve.interfaces = %q, want eth*", got)
 	}
 	if got := result.Labels["traefik.http.services.app.loadbalancer.server.port"]; got != "8080" {
 		t.Fatalf("port = %q, want 8080", got)
