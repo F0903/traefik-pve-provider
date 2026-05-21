@@ -85,9 +85,15 @@ func TestIPsFromInterfacesFiltersByDefaultInterfacePatterns(t *testing.T) {
 				{Address: "10.0.0.20", Type: "ipv4"},
 			},
 		},
+		{
+			Name: "ens18",
+			IPAddresses: []proxmox.IPAddress{
+				{Address: "10.0.0.18", Type: "ipv4"},
+			},
+		},
 	}, IPModeIPv4, DefaultInterfacePatterns())
 
-	if len(ips) != 2 || ips[0].Address != "10.0.0.10" || ips[1].Address != "10.0.0.20" {
+	if len(ips) != 3 || ips[0].Address != "10.0.0.10" || ips[1].Address != "10.0.0.18" || ips[2].Address != "10.0.0.20" {
 		t.Fatalf("ips = %#v", ips)
 	}
 }

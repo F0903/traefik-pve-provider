@@ -12,7 +12,7 @@ import (
 
 const defaultMaxConcurrency = 4
 
-var defaultInterfacePatterns = []string{"eth*", "enp*", "eno*"}
+var defaultInterfacePatterns = []string{"eth*", "enp*", "eno*", "ens*"}
 
 type IPMode string
 

@@ -17,6 +17,7 @@ testData:
       - "eth*"
       - "enp*"
       - "eno*"
+      - "ens*"
     maxConcurrency: 4
   metadataMode: "fenced"
   defaultDomain: "example.com"

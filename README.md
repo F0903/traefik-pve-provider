@@ -47,6 +47,7 @@ providers:
           - eth*
           - enp*
           - eno*
+          - ens*
         maxConcurrency: 4
         nodes:
           - pve-1
@@ -137,7 +138,7 @@ The plugin currently supports these configuration options:
   - `skipStopped`: whether to skip stopped VMs/containers.
   - `skipIPResolution`: whether to skip automatic IP resolution for VMs/containers.
   - `ipMode`: which resolved guest IP versions to register. Supported values are `ipv4`, `ipv6`, and `ipv4/6`; the default is `ipv4`. This has no effect when `skipIPResolution` is true.
-  - `defaultInterfaces`: default guest interface name patterns used for automatic IP resolution. The default is `eth*`, `enp*`, and `eno*`.
+  - `defaultInterfaces`: default guest interface name patterns used for automatic IP resolution. The default is `eth*`, `enp*`, `eno*`, and `ens*`.
   - `maxConcurrency`: maximum concurrent per-guest PVE API calls during scans.
   - `nodes`: limits which PVE nodes are scanned.
   - `requiredTags`: a list of tags that must be present on VMs/containers to be included.
@@ -152,7 +153,8 @@ building Traefik services.
 - `pve.ipMode: ipv4/6` registers both IPv4 and IPv6 guest IPs.
 - `pve.defaultInterfaces` controls which guest interfaces are considered when
   no workload-specific `pve.interfaces` label is set. By default this is
-  `eth*`, `enp*`, and `eno*`.
+  `eth*`, `enp*`, `eno*`, and `ens*`. Omit this option to use the default
+  patterns, or set `defaultInterfaces: []` to consider every interface.
 
 For VMs, IP discovery prefers QEMU guest-agent interface data and falls back to
 static Cloud-Init `ipconfigN` entries from the VM config when present. For

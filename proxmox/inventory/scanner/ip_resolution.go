@@ -38,11 +38,11 @@ func (s *Scanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workloa
 		sem <- struct{}{}
 		// Can't use wg.Go due to Yaegi
 		wg.Add(1)
-		go func() {
+		go func(workload *inventory.Workload) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			s.resolveWorkloadIPs(ctx, workload)
-		}()
+		}(workload)
 	}
 	wg.Wait()
 }
@@ -50,11 +50,12 @@ func (s *Scanner) ResolveIPs(ctx context.Context, workloads []*inventory.Workloa
 func (s *Scanner) resolveWorkloadIPs(ctx context.Context, workload *inventory.Workload) {
 	interfacePatterns, explicitInterfaceFilter := s.interfacePatternsFor(workload)
 	hasInterfaceFilter := len(interfacePatterns) > 0
+	clearFallbackIPs := explicitInterfaceFilter && hasInterfaceFilter
 	switch workload.Kind {
 	case inventory.KindVM:
 		interfaces, err := s.api.VMNetworkInterfaces(ctx, workload.Node, workload.ID)
 		if err != nil {
-			if explicitInterfaceFilter && hasInterfaceFilter {
+			if clearFallbackIPs {
 				workload.IPs = nil
 			}
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
@@ -62,13 +63,13 @@ func (s *Scanner) resolveWorkloadIPs(ctx context.Context, workload *inventory.Wo
 		}
 		if ips := ipsFromInterfaces(interfaces.Result, s.ipMode, interfacePatterns); len(ips) > 0 {
 			workload.IPs = ips
-		} else if explicitInterfaceFilter && hasInterfaceFilter {
+		} else if clearFallbackIPs {
 			workload.IPs = nil
 		}
 	case inventory.KindContainer:
 		interfaces, err := s.api.ContainerInterfaces(ctx, workload.Node, workload.ID)
 		if err != nil {
-			if explicitInterfaceFilter && hasInterfaceFilter {
+			if clearFallbackIPs {
 				workload.IPs = nil
 			}
 			workload.Problems = append(workload.Problems, interfaceProblem(workload.Node, workload.Kind, workload.ID, err))
@@ -76,7 +77,7 @@ func (s *Scanner) resolveWorkloadIPs(ctx context.Context, workload *inventory.Wo
 		}
 		if ips := ipsFromInterfaces(interfaces, s.ipMode, interfacePatterns); len(ips) > 0 {
 			workload.IPs = ips
-		} else if explicitInterfaceFilter && hasInterfaceFilter {
+		} else if clearFallbackIPs {
 			workload.IPs = nil
 		}
 	}

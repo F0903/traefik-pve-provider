@@ -20,10 +20,11 @@ func TestCreateConfig(t *testing.T) {
 	if cfg.PVE.IPMode != "ipv4" {
 		t.Fatalf("PVE.IPMode = %q", cfg.PVE.IPMode)
 	}
-	if len(cfg.PVE.DefaultInterfaces) != 3 ||
+	if len(cfg.PVE.DefaultInterfaces) != 4 ||
 		cfg.PVE.DefaultInterfaces[0] != "eth*" ||
 		cfg.PVE.DefaultInterfaces[1] != "enp*" ||
-		cfg.PVE.DefaultInterfaces[2] != "eno*" {
+		cfg.PVE.DefaultInterfaces[2] != "eno*" ||
+		cfg.PVE.DefaultInterfaces[3] != "ens*" {
 		t.Fatalf("PVE.DefaultInterfaces = %#v", cfg.PVE.DefaultInterfaces)
 	}
 	if cfg.PVE.MaxConcurrency != 4 {

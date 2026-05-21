@@ -124,14 +124,13 @@ func (s *Scanner) scanWorkloads(count int, scan func(index int) inventory.Worklo
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, limit)
 	for index := 0; index < count; index++ {
-		index := index
 		sem <- struct{}{}
 		wg.Add(1)
-		go func() {
+		go func(index int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			workloads[index] = scan(index)
-		}()
+		}(index)
 	}
 	wg.Wait()
 	return workloads
