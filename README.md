@@ -1,6 +1,6 @@
 # Traefik PVE Provider
 
-Automatically create Traefik routers and services via your PVE container/VM notes.
+Automatically create Traefik routers and services via your Proxmox VE container/VM notes.
 
 Inspired by [traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider) but with simpler configuration, larger feature-set and better performance.
 > Note that this is not a fork, but a project built from scratch.
