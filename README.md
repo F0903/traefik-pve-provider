@@ -131,6 +131,7 @@ The plugin currently supports these configuration options:
 - `defaultDomain`: the default domain to configure services and routers under.
 - `pve`: Proxmox API and inventory discovery options.
   - `endpoint`: the Proxmox API endpoint URL.
+  - `endpoints`: optional ordered list of trusted Proxmox API URLs. Takes precedence over `endpoint` when nonempty.
   - `tokenID`: the Proxmox API token ID.
   - `token`: the Proxmox API token.
   - `timeout`: the Proxmox API HTTP request timeout.
@@ -301,3 +302,34 @@ On Proxmox VE versions where guest-agent access is split out, include
 interfaces. If `pve.skipIPResolution: true` is set, guest-agent and LXC interface
 permissions are not needed, but Traefik will need to reach the hostname
 fallbacks this provider generates.
+
+### Proxmox API endpoint failover
+
+For clusters, configure several API entry points:
+
+```yaml
+pve:
+  endpoints:
+    - https://pve-1.example.com:8006
+    - https://pve-2.example.com:8006
+  tokenID: "discovery@pve!traefik"
+  token: "your-token-secret"
+  timeout: "5s"
+```
+
+The existing `endpoint` setting remains supported. A nonempty `endpoints`
+list takes precedence. URLs are normalized and duplicates are removed;
+each distinct endpoint is attempted at most once per request. Configure only
+trusted endpoints: every endpoint receives the configured API credentials.
+
+Only GET requests are retried, after connection errors, HTTP-client timeouts,
+or HTTP 5xx responses. HTTP 4xx responses (including 401, 403, and 429), JSON
+decoding errors, and writes are not retried. A canceled request stops failover.
+The first successful endpoint becomes the starting point for subsequent
+requests until it fails or the provider restarts. Successful requests are
+not sent to other endpoints, and their responses are not merged.
+
+The timeout applies to each endpoint attempt, not the whole scan. With three
+unavailable endpoints and a 5-second timeout, one GET can take around 15 seconds;
+a scan may make several GETs. This changes the API entry point only: an API node
+cannot restore access to guests on a failed Proxmox node.

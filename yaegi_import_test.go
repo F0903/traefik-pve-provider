@@ -63,6 +63,9 @@ require github.com/traefik/yaegi %s
 
 func yaegiHarnessMain() string {
 	const eval = `import "encoding/json"
+import "context"
+import "net/http"
+import "net/http/httptest"
 import pve "github.com/F0903/traefik-pve-provider"
 import proxmox "github.com/F0903/traefik-pve-provider/proxmox"
 import inventory "github.com/F0903/traefik-pve-provider/proxmox/inventory"
@@ -121,6 +124,21 @@ var _ = func() bool {
 	}
 	if payload, err := tconfig.Marshal(config); err != nil || len(payload) == 0 {
 		panic("configuration did not marshal")
+	}
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"data\":[]}"))
+	}))
+	defer good.Close()
+	failoverClient, err := proxmox.NewClient(proxmox.Config{Endpoints: []string{unavailable.URL, good.URL}, TokenID: "test", Token: "test"})
+	if err != nil {
+		panic(err)
+	}
+	if _, err := failoverClient.Nodes(context.Background()); err != nil {
+		panic(err)
 	}
 	return true
 }()`
