@@ -1,8 +1,6 @@
 package traefik
 
 import (
-	"encoding/json"
-
 	"github.com/F0903/traefik-pve-provider/proxmox/inventory"
 	"github.com/traefik/genconf/dynamic"
 	"github.com/traefik/genconf/dynamic/tls"
@@ -117,5 +115,7 @@ func newConfigBuilder(options Options) *configBuilder {
 }
 
 func Marshal(configuration *dynamic.Configuration) ([]byte, error) {
-	return json.Marshal(&dynamic.JSONPayload{Configuration: configuration})
+	// Call directly: Yaegi v0.16.1 cannot wrap json.Marshaler after the
+	// encoding/json type aliases introduced in Go 1.27.
+	return (&dynamic.JSONPayload{Configuration: configuration}).MarshalJSON()
 }
