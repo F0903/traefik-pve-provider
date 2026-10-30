@@ -67,6 +67,7 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 	}
 
 	client, err := proxmox.NewClient(proxmox.Config{
+		Endpoints:          pveConfig.Endpoints,
 		Endpoint:           pveConfig.Endpoint,
 		TokenID:            pveConfig.TokenID,
 		Token:              pveConfig.Token,

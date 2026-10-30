@@ -24,6 +24,7 @@ type Config struct {
 }
 
 type PVEConfig struct {
+	Endpoints          []string `json:"endpoints,omitempty" yaml:"endpoints,omitempty" toml:"endpoints,omitempty"`
 	Endpoint           string   `json:"endpoint,omitempty" yaml:"endpoint,omitempty" toml:"endpoint,omitempty"`
 	TokenID            string   `json:"tokenID,omitempty" yaml:"tokenID,omitempty" toml:"tokenID,omitempty"`
 	Token              string   `json:"token,omitempty" yaml:"token,omitempty" toml:"token,omitempty"`
