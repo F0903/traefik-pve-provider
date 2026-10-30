@@ -292,9 +292,12 @@ func stripZone(address string) string {
 
 func interfaceProblem(node string, kind inventory.Kind, id int, err error) inventory.Problem {
 	message := err.Error()
-	var apiErr *proxmox.APIError
-	if errors.As(err, &apiErr) && apiErr.StatusCode == 403 {
-		message += "; check that the Proxmox API token has interface discovery privileges such as VM.GuestAgent.Audit on PVE 9+"
+	// Yaegi cannot pass interpreted error pointers to compiled errors.As.
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if apiErr, ok := current.(*proxmox.APIError); ok && apiErr.StatusCode == 403 {
+			message += "; check that the Proxmox API token has interface discovery privileges such as VM.GuestAgent.Audit on PVE 9+"
+			break
+		}
 	}
 	return inventory.Problem{
 		Node:    node,
