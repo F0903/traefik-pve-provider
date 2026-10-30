@@ -63,6 +63,11 @@ require github.com/traefik/yaegi %s
 
 func yaegiHarnessMain() string {
 	const eval = `import "encoding/json"
+import "context"
+import "net/http"
+import "net/http/httptest"
+import "strings"
+import scanner "github.com/F0903/traefik-pve-provider/proxmox/inventory/scanner"
 import pve "github.com/F0903/traefik-pve-provider"
 import proxmox "github.com/F0903/traefik-pve-provider/proxmox"
 import inventory "github.com/F0903/traefik-pve-provider/proxmox/inventory"
@@ -121,6 +126,20 @@ var _ = func() bool {
 	}
 	if payload, err := tconfig.Marshal(config); err != nil || len(payload) == 0 {
 		panic("configuration did not marshal")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("permission denied"))
+	}))
+	defer server.Close()
+	client, err := proxmox.NewClient(proxmox.Config{Endpoint: server.URL, TokenID: "test@pve!test", Token: "test"})
+	if err != nil {
+		panic(err)
+	}
+	workload := &inventory.Workload{Kind: inventory.KindVM, Node: "pve-1", ID: 100, Status: "running"}
+	scanner.New(client, scanner.Options{}).ResolveIPs(context.Background(), []*inventory.Workload{workload})
+	if len(workload.Problems) != 1 || !strings.Contains(workload.Problems[0].Message, "VM.GuestAgent.Audit") {
+		panic("missing interface permission diagnostic")
 	}
 	return true
 }()`
